@@ -30,8 +30,13 @@ function readImportedCharacterMap(): Record<string, ImportedKnightCharacter> {
   }
 }
 
-export function createImportedCharacterId(actorId: string | undefined, actorName: string) {
-  const source = actorId && actorId.trim().length > 0 ? actorId : actorName;
+export function createImportedCharacterId(actorId: string | undefined, actorName: string, callsign?: string) {
+  const source =
+    callsign && callsign.trim().length > 0
+      ? callsign
+      : actorId && actorId.trim().length > 0
+        ? actorId
+        : actorName;
   const slug = slugify(source);
 
   return `foundry-${slug || Date.now().toString(36)}`;

@@ -17,12 +17,16 @@ enum AccessScope {
   EDIT
 }
 
-enum EquipmentSlot {
+enum EquipmentCategory {
   WEAPON
-  ARMOR
   MODULE
-  RELIC
-  CONSUMABLE
+  MISC
+}
+
+enum ProgressionCategory {
+  ASPECT
+  CHARACTERISTIC
+  RESOURCE
   OTHER
 }
 
@@ -33,8 +37,9 @@ enum ProgressionStatus {
 }
 
 enum EvolutionKind {
-  ATTRIBUTE
-  SKILL
+  ASPECT
+  CHARACTERISTIC
+  RESOURCE
   ARMOR
   EQUIPMENT
   NARRATIVE
@@ -48,15 +53,15 @@ enum ImportStatus {
 }
 
 model User {
-  id          String           @id @default(cuid())
-  email       String           @unique
-  name        String?
-  role        Role             @default(PLAYER)
-  memberships CampaignMember[]
-  characters  Character[]      @relation("PlayerCharacters")
-  imports     FoundryImport[]   @relation("ImportAuthor")
-  createdAt   DateTime         @default(now())
-  updatedAt   DateTime         @updatedAt
+  id             String           @id @default(cuid())
+  email          String           @unique
+  name           String?
+  role           Role             @default(PLAYER)
+  memberships    CampaignMember[]
+  characterLinks Character[]      @relation("PlayerCharacters")
+  imports        FoundryImport[]  @relation("ImportAuthor")
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
 }
 
 model Campaign {
@@ -83,96 +88,113 @@ model CampaignMember {
 }
 
 model Character {
-  id              String             @id @default(cuid())
-  campaignId      String
-  playerUserId    String?
-  name            String
-  codename        String?
-  archetype       String?
-  rank            String?
-  orderName       String?
-  quote           String?
-  biography       String?
-  glory           Int                @default(0)
-  healthCurrent   Int                @default(0)
-  healthMax       Int                @default(0)
-  energyCurrent   Int                @default(0)
-  energyMax       Int                @default(0)
-  hopeCurrent     Int                @default(0)
-  hopeMax         Int                @default(0)
-  traumaCurrent   Int                @default(0)
-  traumaMax       Int                @default(0)
-  attributes      Json               @default("{}")
-  skills          Json               @default("{}")
-  foundryActorId  String?            @unique
-  campaign        Campaign           @relation(fields: [campaignId], references: [id], onDelete: Cascade)
-  player          User?              @relation("PlayerCharacters", fields: [playerUserId], references: [id], onDelete: SetNull)
-  metaArmor       MetaArmor?
-  equipment       EquipmentItem[]
-  progression     ProgressionBlock[]
-  evolutions      EvolutionEntry[]
-  imports         FoundryImport[]
-  createdAt       DateTime           @default(now())
-  updatedAt       DateTime           @updatedAt
+  id                  String             @id @default(cuid())
+  campaignId          String
+  playerUserId        String?
+  name                String
+  callsign            String
+  slug                String
+  portraitUrl         String?
+  age                 String?
+  archetype           String?
+  section             String?
+  blazon              String?
+  feat                String?
+  description         String?
+  history             String?
+  motivations         String?
+  languages           Json               @default("[]")
+  distinctions        Json               @default("[]")
+  healthCurrent       Int                @default(0)
+  healthMax           Int                @default(0)
+  hopeCurrent         Int                @default(0)
+  hopeMax             Int                @default(0)
+  heroismCurrent      Int                @default(0)
+  heroismMax          Int                @default(0)
+  aegis               Int                @default(0)
+  defense             Int                @default(0)
+  reaction            Int                @default(0)
+  aspects             Json               @default("{}")
+  characteristics     Json               @default("{}")
+  foundryActorId      String?            @unique
+  foundryData         Json?
+  notesMj             String?
+  campaign            Campaign           @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  player              User?              @relation("PlayerCharacters", fields: [playerUserId], references: [id], onDelete: SetNull)
+  metaArmor           MetaArmor?
+  equipment           EquipmentItem[]
+  progressionBlocks   ProgressionBlock[]
+  evolutionEntries    EvolutionEntry[]
+  imports             FoundryImport[]
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
 
+  @@unique([campaignId, slug])
   @@index([campaignId])
   @@index([playerUserId])
+  @@index([callsign])
 }
 
 model MetaArmor {
-  id             String    @id @default(cuid())
-  characterId    String    @unique
-  name           String
-  frame          String?
-  generation     String?
-  armorCurrent   Int       @default(0)
-  armorMax       Int       @default(0)
-  shieldCurrent  Int       @default(0)
-  shieldMax      Int       @default(0)
-  overdriveValue Int       @default(0)
-  overdriveMax   Int       @default(0)
-  slots          Json      @default("[]")
-  systems        Json      @default("[]")
-  notes          String?
-  character      Character @relation(fields: [characterId], references: [id], onDelete: Cascade)
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  id                 String    @id @default(cuid())
+  characterId        String    @unique
+  name               String
+  generation         Int?
+  armorCurrent       Int       @default(0)
+  armorMax           Int       @default(0)
+  forceFieldCurrent  Int       @default(0)
+  forceFieldMax      Int       @default(0)
+  energyCurrent      Int       @default(0)
+  energyMax          Int       @default(0)
+  embeddedAi         String?
+  capabilities       Json      @default("[]")
+  description        String?
+  foundryData        Json?
+  character          Character @relation(fields: [characterId], references: [id], onDelete: Cascade)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 }
 
 model EquipmentItem {
-  id          String        @id @default(cuid())
-  characterId String
-  name        String
-  slot        EquipmentSlot @default(OTHER)
-  quantity    Int           @default(1)
-  equipped    Boolean       @default(false)
-  tags        String[]      @default([])
-  bonuses     Json          @default("{}")
-  description String?
-  character   Character     @relation(fields: [characterId], references: [id], onDelete: Cascade)
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
+  id             String            @id @default(cuid())
+  characterId    String
+  category       EquipmentCategory
+  sourceType     String?
+  name           String
+  sortOrder      Int               @default(0)
+  equipped       Boolean           @default(false)
+  quantity       Int               @default(1)
+  description    String?
+  tags           String[]          @default([])
+  foundryItemId  String?
+  foundryData    Json?
+  character      Character         @relation(fields: [characterId], references: [id], onDelete: Cascade)
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
 
-  @@index([characterId])
+  @@index([characterId, category, sortOrder])
+  @@index([foundryItemId])
 }
 
 model ProgressionBlock {
-  id          String            @id @default(cuid())
-  characterId String
-  blockNumber Int
-  title       String
-  category    String
-  bonusValue  Int               @default(1)
-  costXp      Int               @default(0)
-  status      ProgressionStatus @default(AVAILABLE)
-  note        String?
-  spentAt     DateTime?
-  character   Character         @relation(fields: [characterId], references: [id], onDelete: Cascade)
-  evolutions  EvolutionEntry[]
-  createdAt   DateTime          @default(now())
-  updatedAt   DateTime          @updatedAt
+  id              String              @id @default(cuid())
+  characterId     String
+  sortOrder       Int
+  label           String
+  category        ProgressionCategory @default(OTHER)
+  targetKey       String?
+  bonusValue      Int                 @default(1)
+  costXp          Int                 @default(0)
+  status          ProgressionStatus   @default(AVAILABLE)
+  source          String?             @default("manual")
+  notes           String?
+  spentAt         DateTime?
+  character       Character           @relation(fields: [characterId], references: [id], onDelete: Cascade)
+  evolutionEntries EvolutionEntry[]
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
 
-  @@unique([characterId, blockNumber])
+  @@unique([characterId, sortOrder])
   @@index([characterId, status])
 }
 
@@ -181,9 +203,12 @@ model EvolutionEntry {
   characterId        String
   progressionBlockId String?
   kind               EvolutionKind
-  title              String
+  targetKey          String?
+  label              String
+  initialValue       String?
+  currentValue       String?
+  gainValue          String?
   description        String?
-  xpCost             Int               @default(0)
   appliedAt          DateTime?
   character          Character         @relation(fields: [characterId], references: [id], onDelete: Cascade)
   progressionBlock   ProgressionBlock? @relation(fields: [progressionBlockId], references: [id], onDelete: SetNull)
@@ -201,6 +226,8 @@ model FoundryImport {
   importedById   String?
   fileName       String?
   actorId        String?
+  actorName      String?
+  callsign       String?
   sourceVersion  String?
   status         ImportStatus @default(PENDING)
   rawJson        Json

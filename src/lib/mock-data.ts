@@ -9,18 +9,86 @@ import type {
 export const mockCharacter: KnightCharacter = {
   id: "char-ariane",
   name: "Ariane Delorme",
+  callsign: "Sillage",
+  age: "34 ans",
   codename: "Sillage",
   playerName: "Camille",
   archetype: "Chevalier tacticien",
+  section: "Section Lyon",
+  blazon: "Écu d'argent barré d'un sillage noir",
+  feat: "Extraction de Verre Noir",
   rank: "Banneret",
   order: "Section Lyon",
   quote: "On ne gagne pas contre l'Anathème avec du courage seul.",
   biography:
     "Ancienne logisticienne de crise, Ariane coordonne les frappes rapides et maintient son escouade soudée quand la nuit gagne du terrain.",
+  description:
+    "Silhouette nerveuse, voix basse, regard toujours posé sur les issues. Ariane donne l'impression de calculer trois retraites possibles avant chaque entrée dans une pièce.",
+  history:
+    "Ancienne logisticienne de crise, Ariane a été recrutée après avoir tenu une zone d'évacuation isolée pendant trente-six heures.",
+  motivations: "Ramener tout le monde vivant, même quand le plan initial s'effondre.",
+  languages: ["Français", "Anglais", "Codes opérationnels Knight"],
+  distinctions: ["Citation de Verre Noir", "Ruban de coordination d'escouade"],
   health: { current: 13, max: 16 },
-  energy: { current: 8, max: 12 },
   hope: { current: 5, max: 7 },
+  heroism: { current: 2, max: 3 },
+  aegis: 2,
+  defense: 8,
+  reaction: 5,
+  energy: { current: 8, max: 12 },
   trauma: { current: 1, max: 5 },
+  aspectGroups: [
+    {
+      key: "chair",
+      label: "Chair",
+      value: 4,
+      characteristics: [
+        { key: "force", label: "Force", value: 3 },
+        { key: "endurance", label: "Endurance", value: 4 },
+        { key: "combat", label: "Combat", value: 2 }
+      ]
+    },
+    {
+      key: "bete",
+      label: "Bête",
+      value: 3,
+      characteristics: [
+        { key: "instinct", label: "Instinct", value: 3 },
+        { key: "agilite", label: "Agilité", value: 4 },
+        { key: "survie", label: "Survie", value: 2 }
+      ]
+    },
+    {
+      key: "machine",
+      label: "Machine",
+      value: 3,
+      characteristics: [
+        { key: "technique", label: "Technique", value: 3 },
+        { key: "tir", label: "Tir", value: 4 },
+        { key: "savoir", label: "Savoir", value: 3 }
+      ]
+    },
+    {
+      key: "dame",
+      label: "Dame",
+      value: 2,
+      characteristics: [
+        { key: "aura", label: "Aura", value: 3 },
+        { key: "parole", label: "Parole", value: 2 },
+        { key: "art", label: "Art", value: 1 }
+      ]
+    },
+    {
+      key: "masque",
+      label: "Masque",
+      value: 4,
+      characteristics: [
+        { key: "discretion", label: "Discrétion", value: 4 },
+        { key: "mensonge", label: "Mensonge", value: 2 },
+        { key: "sang-froid", label: "Sang-froid", value: 3 }
+      ]
+    }
+  ],
   aspects: [
     { key: "dominant", label: "Dominant", value: "Stratège calme" },
     { key: "faille", label: "Faille", value: "Refuse de laisser quelqu'un derrière elle" }

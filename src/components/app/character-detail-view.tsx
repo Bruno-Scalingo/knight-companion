@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { playerReadOnlyAccess } from "@/lib/access";
+import { decodeHtmlEntities } from "@/lib/html-entities";
 import { readImportedCharacterById } from "@/lib/imported-character-store";
 import {
   mockCharacter,
@@ -23,6 +24,7 @@ import {
   mockProgressionBlocks
 } from "@/lib/mock-data";
 import type {
+  AspectGroup,
   EquipmentItem,
   EvolutionEntry,
   ImportedKnightCharacter,
@@ -92,6 +94,27 @@ function buildMockCharacterData(): ResolvedCharacterData {
   };
 }
 
+function decodeText(value: string | undefined) {
+  return decodeHtmlEntities(value ?? "");
+}
+
+function decodeTextList(values: string[] | undefined) {
+  return (values ?? []).map((value) => decodeHtmlEntities(value)).filter((value) => value.length > 0);
+}
+
+function decodeAspectGroups(groups: AspectGroup[] | undefined): AspectGroup[] {
+  return (groups ?? []).map((group) => ({
+    ...group,
+    label: decodeHtmlEntities(group.label),
+    value: typeof group.value === "string" ? decodeHtmlEntities(group.value) : group.value,
+    characteristics: group.characteristics.map((characteristic) => ({
+      ...characteristic,
+      label: decodeHtmlEntities(characteristic.label),
+      value: typeof characteristic.value === "string" ? decodeHtmlEntities(characteristic.value) : characteristic.value
+    }))
+  }));
+}
+
 function buildImportedCharacterData(record: ImportedKnightCharacter): ResolvedCharacterData {
   const draft = record.character;
 
@@ -99,22 +122,38 @@ function buildImportedCharacterData(record: ImportedKnightCharacter): ResolvedCh
     source: "imported",
     character: {
       id: record.id,
-      name: draft.name,
-      codename: draft.codename ?? "",
+      name: decodeText(draft.name),
+      callsign: decodeText(draft.callsign ?? draft.codename),
+      portraitUrl: draft.portraitUrl,
+      age: decodeText(draft.age),
+      codename: decodeText(draft.codename),
       playerName: "Import Foundry",
-      archetype: draft.archetype ?? "",
-      rank: draft.rank ?? "",
-      order: draft.order ?? "",
-      quote: draft.quote ?? "",
-      biography: draft.biography ?? "",
+      archetype: decodeText(draft.archetype),
+      section: decodeText(draft.section ?? draft.order),
+      blazon: decodeText(draft.blazon),
+      feat: decodeText(draft.feat),
+      rank: decodeText(draft.rank),
+      order: decodeText(draft.order),
+      quote: decodeText(draft.quote),
+      biography: decodeText(draft.biography),
+      description: decodeText(draft.description),
+      history: decodeText(draft.history ?? draft.biography),
+      motivations: decodeText(draft.motivations),
+      languages: decodeTextList(draft.languages),
+      distinctions: decodeTextList(draft.distinctions),
       health: draft.health ?? { current: 0, max: 0 },
-      energy: draft.energy ?? { current: 0, max: 0 },
       hope: draft.hope ?? { current: 0, max: 0 },
+      heroism: draft.heroism ?? { current: 0, max: 0 },
+      aegis: draft.aegis ?? 0,
+      defense: draft.defense ?? 0,
+      reaction: draft.reaction ?? 0,
+      energy: draft.energy ?? { current: 0, max: 0 },
       trauma: draft.trauma ?? { current: 0, max: 0 },
+      aspectGroups: decodeAspectGroups(draft.aspectGroups),
       aspects: draft.aspects ?? [],
       characteristics: draft.characteristics ?? [],
-      attributes: draft.attributes,
-      skills: draft.skills
+      attributes: draft.attributes ?? [],
+      skills: draft.skills ?? []
     },
     metaArmor: draft.metaArmor ?? null,
     equipment: draft.equipment ?? [],
@@ -226,131 +265,225 @@ function CharacterHeader({
   );
 }
 
+const aspectOrder = ["chair", "bete", "bête", "machine", "dame", "masque"];
+
+function sortAspectGroups(groups: AspectGroup[]) {
+  return [...groups].sort((first, second) => {
+    const firstIndex = aspectOrder.indexOf(first.key.toLowerCase());
+    const secondIndex = aspectOrder.indexOf(second.key.toLowerCase());
+
+    return (firstIndex === -1 ? 99 : firstIndex) - (secondIndex === -1 ? 99 : secondIndex);
+  });
+}
+
+function buildFallbackAspectGroups(character: KnightCharacter): AspectGroup[] {
+  if (character.aspectGroups && character.aspectGroups.length > 0) {
+    return sortAspectGroups(character.aspectGroups);
+  }
+
+  if (character.attributes.length === 0) {
+    return [];
+  }
+
+  return character.attributes.map((attribute) => ({
+    key: attribute.key,
+    label: attribute.label,
+    value: attribute.value,
+    characteristics: character.skills
+      .filter((skill) => skill.attribute.toLowerCase() === attribute.label.toLowerCase())
+      .map((skill) => ({
+        key: skill.key,
+        label: skill.label,
+        value: skill.value
+      }))
+  }));
+}
+
 function CharacterSummary({ data }: { data: ResolvedCharacterData }) {
   const { character } = data;
+  const aspectGroups = buildFallbackAspectGroups(character);
+  const fallbackBiography = character.biography || "Aucune biographie importée pour ce personnage.";
 
   return (
     <>
-      <section className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
+      <section className="grid gap-4 lg:grid-cols-[18rem_1fr]">
+        <Card>
+          <CardContent className="p-4">
+            <div className="aspect-[3/4] overflow-hidden rounded-md border bg-muted">
+              {character.portraitUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={character.portraitUrl}
+                  alt={`Portrait de ${character.name}`}
+                  className="h-full w-full object-cover"
+                />
+              ) : (
+                <div className="flex h-full items-center justify-center px-6 text-center">
+                  <div>
+                    <p className="text-5xl font-bold text-muted-foreground">
+                      {(character.callsign || character.name).slice(0, 2).toUpperCase()}
+                    </p>
+                    <p className="mt-3 text-sm text-muted-foreground">Portrait non importé</p>
+                  </div>
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+
         <Card>
           <CardHeader>
             <div className="flex flex-wrap items-center gap-2">
               <CardTitle>{character.name}</CardTitle>
-              {character.codename ? <Badge variant="secondary">{character.codename}</Badge> : null}
+              {character.callsign ? <Badge variant="secondary">{character.callsign}</Badge> : null}
             </div>
-            <CardDescription>
-              {character.archetype || "Archétype non renseigné"}
-              {character.rank ? ` · ${character.rank}` : ""}
-              {character.order ? ` · ${character.order}` : ""}
-            </CardDescription>
+            <CardDescription>{character.archetype || "Archétype non renseigné"}</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-4">
-            {character.quote ? (
-              <blockquote className="border-l-4 border-primary pl-4 text-sm italic text-muted-foreground">
-                {character.quote}
-              </blockquote>
-            ) : null}
-            <p className="text-sm leading-6 text-muted-foreground">
-              {character.biography || "Aucune biographie importée pour ce personnage."}
-            </p>
-            <div className="rounded-md bg-muted p-3 text-sm">
-              <span className="font-medium">Source :</span>{" "}
-              {data.source === "mock" ? character.playerName : "Import Foundry VTT"}
-            </div>
+          <CardContent className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            <IdentityField label="Nom" value={character.name} />
+            <IdentityField label="Surnom" value={character.callsign} />
+            <IdentityField label="Âge" value={character.age} />
+            <IdentityField label="Archétype" value={character.archetype} />
+            <IdentityField label="Section" value={character.section || character.order} />
+            <IdentityField label="Blason" value={character.blazon} />
+            <IdentityField label="Haut-fait" value={character.feat} className="sm:col-span-2 xl:col-span-3" />
           </CardContent>
         </Card>
-
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-1">
-          <GaugeCard label="Santé" gauge={character.health} />
-          <GaugeCard label="Énergie" gauge={character.energy} tone="secondary" />
-          <GaugeCard label="Espoir" gauge={character.hope} tone="accent" />
-          <GaugeCard label="Trauma" gauge={character.trauma} />
-        </div>
       </section>
 
-      <section className="grid gap-4 lg:grid-cols-2">
+      <section className="grid gap-4 lg:grid-cols-[1fr_18rem]">
         <Card>
           <CardHeader>
-            <CardTitle>Aspects</CardTitle>
-            <CardDescription>Libellés textuels détectés dans l'export Knight.</CardDescription>
+            <CardTitle>Ressources</CardTitle>
+            <CardDescription>Valeurs actuelles du personnage.</CardDescription>
           </CardHeader>
-          <CardContent className="grid gap-3 sm:grid-cols-2">
-            {character.aspects && character.aspects.length > 0 ? (
-              character.aspects.map((aspect) => (
-                <div key={aspect.key} className="rounded-md border p-4">
-                  <p className="text-sm text-muted-foreground">{aspect.label}</p>
-                  <p className="mt-2 font-semibold">{aspect.value}</p>
-                </div>
-              ))
-            ) : (
-              <EmptyStateCard message="Aucun aspect exploitable n'a été trouvé dans cet export." />
-            )}
+          <CardContent className="grid gap-3 md:grid-cols-3">
+            <GaugeCard label="Santé" gauge={character.health} />
+            <GaugeCard label="Espoir" gauge={character.hope} tone="accent" />
+            <GaugeCard label="Héroïsme" gauge={character.heroism} tone="secondary" />
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader>
-            <CardTitle>Caractéristiques</CardTitle>
-            <CardDescription>Valeurs numériques ou textuelles lues dans `system.characteristics` et variantes proches.</CardDescription>
+            <CardTitle>Défenses</CardTitle>
+            <CardDescription>Scores fixes lus depuis la fiche.</CardDescription>
           </CardHeader>
-          <CardContent className="grid gap-3 sm:grid-cols-2">
-            {character.characteristics && character.characteristics.length > 0 ? (
-              character.characteristics.map((entry) => (
-                <div key={entry.key} className="rounded-md border p-4">
-                  <p className="text-sm text-muted-foreground">{entry.label}</p>
-                  <p className="mt-2 text-2xl font-bold">{entry.value}</p>
-                </div>
-              ))
-            ) : (
-              <EmptyStateCard message="Aucune caractéristique n'a été trouvée dans cet export." />
-            )}
+          <CardContent className="grid grid-cols-3 gap-2 lg:grid-cols-1">
+            <NumericStat label="Égide" value={character.aegis} />
+            <NumericStat label="Défense" value={character.defense} />
+            <NumericStat label="Réaction" value={character.reaction} />
           </CardContent>
         </Card>
       </section>
 
-      <CharacterScores data={data} />
+      <Card>
+        <CardHeader>
+          <CardTitle>Aspects et caractéristiques</CardTitle>
+          <CardDescription>Les cinq aspects Knight avec leurs caractéristiques associées.</CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-3 lg:grid-cols-5">
+          {aspectGroups.length > 0 ? (
+            aspectGroups.map((aspect) => (
+              <div key={aspect.key} className="rounded-md border p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm text-muted-foreground">{aspect.label}</p>
+                    <p className="mt-1 text-3xl font-bold">{aspect.value}</p>
+                  </div>
+                </div>
+                <Separator className="my-3" />
+                <div className="space-y-2">
+                  {aspect.characteristics.length > 0 ? (
+                    aspect.characteristics.map((characteristic) => (
+                      <div key={characteristic.key} className="flex items-center justify-between gap-3 text-sm">
+                        <span className="text-muted-foreground">{characteristic.label}</span>
+                        <span className="font-semibold">{characteristic.value}</span>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="text-sm text-muted-foreground">Caractéristiques non importées.</p>
+                  )}
+                </div>
+              </div>
+            ))
+          ) : (
+            <EmptyStateCard message="Aucun aspect exploitable n'a été trouvé dans cet export." />
+          )}
+        </CardContent>
+      </Card>
+
+      <section className="grid gap-4 lg:grid-cols-[1fr_20rem]">
+        <Card>
+          <CardHeader>
+            <CardTitle>Biographie</CardTitle>
+            <CardDescription>Description, histoire et motivations.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4 text-sm leading-6 text-muted-foreground">
+            <BiographyBlock title="Description" value={character.description || fallbackBiography} />
+            <BiographyBlock title="Histoire" value={character.history || fallbackBiography} />
+            <BiographyBlock title="Motivations" value={character.motivations} />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Repères</CardTitle>
+            <CardDescription>Langues et distinctions.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-5">
+            <TagList title="Langues" values={character.languages} emptyLabel="Aucune langue importée." />
+            <TagList title="Distinctions" values={character.distinctions} emptyLabel="Aucune distinction importée." />
+          </CardContent>
+        </Card>
+      </section>
     </>
   );
 }
 
-function CharacterScores({ data }: { data: ResolvedCharacterData }) {
-  const { character } = data;
-
+function IdentityField({ label, value, className }: { label: string; value?: string; className?: string }) {
   return (
-    <section className="grid gap-4 lg:grid-cols-2">
-      <Card>
-        <CardHeader>
-          <CardTitle>Attributs</CardTitle>
-          <CardDescription>Profil opérationnel.</CardDescription>
-        </CardHeader>
-        <CardContent className="grid gap-3 sm:grid-cols-2">
-          {character.attributes.map((attribute) => (
-            <div key={attribute.key} className="rounded-md border p-4">
-              <p className="text-sm text-muted-foreground">{attribute.label}</p>
-              <p className="mt-2 text-3xl font-bold">{attribute.value}</p>
-            </div>
-          ))}
-        </CardContent>
-      </Card>
+    <div className={className}>
+      <p className="text-xs font-medium uppercase tracking-normal text-muted-foreground">{label}</p>
+      <p className="mt-1 min-h-6 text-sm font-semibold">{value || "Non renseigné"}</p>
+    </div>
+  );
+}
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Compétences</CardTitle>
-          <CardDescription>Spécialisations utiles en action.</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {character.skills.map((skill) => (
-            <div key={skill.key} className="flex items-center justify-between rounded-md border px-4 py-3">
-              <div>
-                <p className="font-medium">{skill.label}</p>
-                <p className="text-sm text-muted-foreground">{skill.attribute}</p>
-              </div>
-              <Badge variant="outline">+{skill.value}</Badge>
-            </div>
+function NumericStat({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded-md border p-3 text-center lg:text-left">
+      <p className="text-xs font-medium uppercase tracking-normal text-muted-foreground">{label}</p>
+      <p className="mt-1 text-2xl font-bold">{value}</p>
+    </div>
+  );
+}
+
+function BiographyBlock({ title, value }: { title: string; value?: string }) {
+  return (
+    <div>
+      <h3 className="text-sm font-semibold text-foreground">{title}</h3>
+      <p className="mt-1">{value || "Non renseigné."}</p>
+    </div>
+  );
+}
+
+function TagList({ title, values, emptyLabel }: { title: string; values: string[]; emptyLabel: string }) {
+  return (
+    <div>
+      <h3 className="text-sm font-semibold">{title}</h3>
+      {values.length > 0 ? (
+        <div className="mt-2 flex flex-wrap gap-2">
+          {values.map((value) => (
+            <Badge key={value} variant="outline">
+              {value}
+            </Badge>
           ))}
-        </CardContent>
-      </Card>
-    </section>
+        </div>
+      ) : (
+        <p className="mt-2 text-sm text-muted-foreground">{emptyLabel}</p>
+      )}
+    </div>
   );
 }
 

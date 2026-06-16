@@ -1,4 +1,5 @@
 import type {
+  AspectGroup,
   AspectEntry,
   CharacteristicEntry,
   EquipmentItem,
@@ -9,13 +10,23 @@ import type {
   ProgressionBlock,
   SkillScore
 } from "@/types/knight";
+import { decodeHtmlEntities } from "@/lib/html-entities";
+
+const knightAspectLabels: Record<string, string> = {
+  chair: "Chair",
+  bete: "Bête",
+  bête: "Bête",
+  machine: "Machine",
+  dame: "Dame",
+  masque: "Masque"
+};
 
 function readRecord(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
 }
 
 function readString(value: unknown, fallback = "") {
-  return typeof value === "string" && value.length > 0 ? value : fallback;
+  return typeof value === "string" && value.length > 0 ? decodeHtmlEntities(value) : fallback;
 }
 
 function readNumber(value: unknown, fallback = 0) {
@@ -36,7 +47,7 @@ function humanizeKey(key: string) {
 }
 
 function stripHtml(value: string) {
-  return value.replace(/<[^>]*>/g, " ").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim();
+  return decodeHtmlEntities(value.replace(/<[^>]*>/g, " ")).replace(/\s+/g, " ").trim();
 }
 
 function readPath(source: Record<string, unknown>, path: string[]) {
@@ -54,11 +65,11 @@ function pickFirstString(source: Record<string, unknown>, paths: string[][], fal
     const value = readPath(source, path);
 
     if (typeof value === "string" && value.trim().length > 0) {
-      return value;
+      return decodeHtmlEntities(value);
     }
   }
 
-  return fallback;
+  return decodeHtmlEntities(fallback);
 }
 
 function pickFirstNumber(source: Record<string, unknown>, paths: string[][], fallback = 0) {
@@ -84,6 +95,34 @@ function pickFirstRecord(source: Record<string, unknown>, paths: string[][]) {
   }
 
   return {};
+}
+
+function pickFirstStringArray(source: Record<string, unknown>, paths: string[][]) {
+  for (const path of paths) {
+    const value = readPath(source, path);
+
+    if (Array.isArray(value)) {
+      return value
+        .map((entry) => {
+          if (typeof entry === "string") {
+            return decodeHtmlEntities(entry.trim());
+          }
+
+          const record = readRecord(entry);
+          return decodeHtmlEntities(pickFirstString(record, [["label"], ["name"], ["title"], ["value"]]).trim());
+        })
+        .filter((entry) => entry.length > 0);
+    }
+
+    if (typeof value === "string" && value.trim().length > 0) {
+      return value
+        .split(/[,;\n]/)
+        .map((entry) => decodeHtmlEntities(entry.trim()))
+        .filter((entry) => entry.length > 0);
+    }
+  }
+
+  return [];
 }
 
 function readCollectionValue(entry: unknown) {
@@ -215,6 +254,41 @@ function parseKnightCharacteristics(source: Record<string, unknown>): Characteri
         value: total
       };
     });
+  });
+}
+
+function readKnightScore(entry: Record<string, unknown>) {
+  const base = pickFirstNumber(entry, [["base"]], 0);
+  const current = pickFirstNumber(entry, [["value"]], 0);
+  const bonus = pickFirstNumber(readRecord(entry.bonus), [["user"], ["value"]], 0);
+  const malus = pickFirstNumber(readRecord(entry.malus), [["user"], ["value"]], 0);
+  const overdrive = pickFirstNumber(readRecord(entry.overdrive), [["value"]], 0);
+
+  return base + current + bonus + overdrive - malus;
+}
+
+function parseKnightAspectGroups(source: Record<string, unknown>): AspectGroup[] {
+  const aspects = pickFirstRecord(source, [["aspects"]]);
+
+  return Object.entries(aspects).map(([aspectKey, aspectValue]) => {
+    const aspectRecord = readRecord(aspectValue);
+    const characteristics = readRecord(aspectRecord.caracteristiques);
+    const normalizedAspectKey = aspectKey.toLowerCase();
+
+    return {
+      key: aspectKey,
+      label: knightAspectLabels[normalizedAspectKey] ?? humanizeKey(aspectKey),
+      value: readKnightScore(aspectRecord),
+      characteristics: Object.entries(characteristics).map(([characteristicKey, characteristicValue]) => {
+        const characteristicRecord = readRecord(characteristicValue);
+
+        return {
+          key: `${aspectKey}-${characteristicKey}`,
+          label: humanizeKey(characteristicKey),
+          value: readKnightScore(characteristicRecord)
+        };
+      })
+    };
   });
 }
 
@@ -411,6 +485,7 @@ export function validateFoundryKnightActor(input: unknown): FoundryActorValidati
 export function normalizeFoundryKnightActor(actor: FoundryKnightActor): KnightCharacterDraft {
   const system = readRecord(actor.system);
   const items = Array.isArray(actor.items) ? actor.items.map((item) => readRecord(item)) : [];
+  const aspectGroups = parseKnightAspectGroups(system);
   const aspects = parseKnightAspects(system);
   const characteristics = parseKnightCharacteristics(system);
   const attributes = parseKnightAttributes(system);
@@ -425,18 +500,34 @@ export function normalizeFoundryKnightActor(actor: FoundryKnightActor): KnightCh
 
   return {
     name: actor.name,
+    callsign: pickFirstString(system, [["surnom"], ["callsign"], ["codename"], ["alias"]]),
+    portraitUrl: readString(actor.img),
+    age: pickFirstString(system, [["age"], ["identite", "age"], ["identity", "age"]]),
     codename: pickFirstString(system, [["surnom"], ["codename"], ["callsign"], ["alias"]]),
     archetype: pickFirstString(system, [["archetype"], ["role"], ["class"]]),
+    section: pickFirstString(system, [["section"], ["order"], ["organization"]]),
+    blazon: pickFirstString(system, [["blason"], ["blazon"], ["armoiries"]]),
+    feat: pickFirstString(system, [["hautFait"], ["haut-fait"], ["haut_fait"], ["feat"]]),
     rank: pickFirstString(system, [["rank"], ["grade"]], "Écuyer"),
     order: pickFirstString(system, [["section"], ["order"], ["organization"]]),
     quote: pickFirstString(system, [["quote"], ["citation"]]),
     biography: stripHtml(
       pickFirstString(system, [["histoire"], ["biography"], ["background"], ["history"], ["description"]])
     ),
+    description: stripHtml(pickFirstString(system, [["description"], ["identite", "description"]])),
+    history: stripHtml(pickFirstString(system, [["histoire"], ["history"], ["background"]])),
+    motivations: stripHtml(pickFirstString(system, [["motivations"], ["motivation"], ["drive"]])),
+    languages: pickFirstStringArray(system, [["langues"], ["languages"]]),
+    distinctions: pickFirstStringArray(system, [["distinctions"], ["distinction"]]),
     health: normalizeFlatGauge(readRecord(system.sante)),
-    energy: normalizeFlatGauge(readRecord(system.energie)),
     hope: normalizeFlatGauge(readRecord(system.espoir)),
+    heroism: normalizeFlatGauge(readRecord(system.heroisme)),
+    aegis: pickFirstNumber(system, [["egide", "value"], ["égide", "value"], ["egide"], ["aegis", "value"], ["aegis"]], 0),
+    defense: pickFirstNumber(system, [["defense", "value"], ["défense", "value"], ["defense"], ["défense"]], 0),
+    reaction: pickFirstNumber(system, [["reaction", "value"], ["réaction", "value"], ["reaction"], ["réaction"]], 0),
+    energy: normalizeFlatGauge(readRecord(system.energie)),
     trauma: parseGauge(system, [["trauma"]], { current: 0, max: 0 }),
+    aspectGroups,
     aspects,
     characteristics,
     metaArmor: parseMetaArmorFromItems(items, system),

@@ -91,7 +91,7 @@ export function FoundryImportPanel() {
       }
 
       const character = normalizeFoundryKnightActor(validation.actor);
-      const characterId = createImportedCharacterId(validation.actor._id, character.name);
+      const characterId = createImportedCharacterId(validation.actor._id, character.name, character.callsign);
       const characterRoute = `/personnages/${characterId}` as Route;
 
       saveImportedCharacter({

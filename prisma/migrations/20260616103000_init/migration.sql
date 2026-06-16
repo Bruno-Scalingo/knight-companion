@@ -5,13 +5,16 @@ CREATE TYPE "Role" AS ENUM ('ADMIN', 'PLAYER');
 CREATE TYPE "AccessScope" AS ENUM ('READ_ONLY', 'EDIT');
 
 -- CreateEnum
-CREATE TYPE "EquipmentSlot" AS ENUM ('WEAPON', 'ARMOR', 'MODULE', 'RELIC', 'CONSUMABLE', 'OTHER');
+CREATE TYPE "EquipmentCategory" AS ENUM ('WEAPON', 'MODULE', 'MISC');
+
+-- CreateEnum
+CREATE TYPE "ProgressionCategory" AS ENUM ('ASPECT', 'CHARACTERISTIC', 'RESOURCE', 'OTHER');
 
 -- CreateEnum
 CREATE TYPE "ProgressionStatus" AS ENUM ('AVAILABLE', 'SPENT', 'LOCKED');
 
 -- CreateEnum
-CREATE TYPE "EvolutionKind" AS ENUM ('ATTRIBUTE', 'SKILL', 'ARMOR', 'EQUIPMENT', 'NARRATIVE');
+CREATE TYPE "EvolutionKind" AS ENUM ('ASPECT', 'CHARACTERISTIC', 'RESOURCE', 'ARMOR', 'EQUIPMENT', 'NARRATIVE');
 
 -- CreateEnum
 CREATE TYPE "ImportStatus" AS ENUM ('PENDING', 'PARSED', 'APPLIED', 'FAILED');
@@ -56,24 +59,33 @@ CREATE TABLE "Character" (
     "campaignId" TEXT NOT NULL,
     "playerUserId" TEXT,
     "name" TEXT NOT NULL,
-    "codename" TEXT,
+    "callsign" TEXT NOT NULL,
+    "slug" TEXT NOT NULL,
+    "portraitUrl" TEXT,
+    "age" TEXT,
     "archetype" TEXT,
-    "rank" TEXT,
-    "orderName" TEXT,
-    "quote" TEXT,
-    "biography" TEXT,
-    "glory" INTEGER NOT NULL DEFAULT 0,
+    "section" TEXT,
+    "blazon" TEXT,
+    "feat" TEXT,
+    "description" TEXT,
+    "history" TEXT,
+    "motivations" TEXT,
+    "languages" JSONB NOT NULL DEFAULT '[]',
+    "distinctions" JSONB NOT NULL DEFAULT '[]',
     "healthCurrent" INTEGER NOT NULL DEFAULT 0,
     "healthMax" INTEGER NOT NULL DEFAULT 0,
-    "energyCurrent" INTEGER NOT NULL DEFAULT 0,
-    "energyMax" INTEGER NOT NULL DEFAULT 0,
     "hopeCurrent" INTEGER NOT NULL DEFAULT 0,
     "hopeMax" INTEGER NOT NULL DEFAULT 0,
-    "traumaCurrent" INTEGER NOT NULL DEFAULT 0,
-    "traumaMax" INTEGER NOT NULL DEFAULT 0,
-    "attributes" JSONB NOT NULL DEFAULT '{}',
-    "skills" JSONB NOT NULL DEFAULT '{}',
+    "heroismCurrent" INTEGER NOT NULL DEFAULT 0,
+    "heroismMax" INTEGER NOT NULL DEFAULT 0,
+    "aegis" INTEGER NOT NULL DEFAULT 0,
+    "defense" INTEGER NOT NULL DEFAULT 0,
+    "reaction" INTEGER NOT NULL DEFAULT 0,
+    "aspects" JSONB NOT NULL DEFAULT '{}',
+    "characteristics" JSONB NOT NULL DEFAULT '{}',
     "foundryActorId" TEXT,
+    "foundryData" JSONB,
+    "notesMj" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
@@ -85,17 +97,17 @@ CREATE TABLE "MetaArmor" (
     "id" TEXT NOT NULL,
     "characterId" TEXT NOT NULL,
     "name" TEXT NOT NULL,
-    "frame" TEXT,
-    "generation" TEXT,
+    "generation" INTEGER,
     "armorCurrent" INTEGER NOT NULL DEFAULT 0,
     "armorMax" INTEGER NOT NULL DEFAULT 0,
-    "shieldCurrent" INTEGER NOT NULL DEFAULT 0,
-    "shieldMax" INTEGER NOT NULL DEFAULT 0,
-    "overdriveValue" INTEGER NOT NULL DEFAULT 0,
-    "overdriveMax" INTEGER NOT NULL DEFAULT 0,
-    "slots" JSONB NOT NULL DEFAULT '[]',
-    "systems" JSONB NOT NULL DEFAULT '[]',
-    "notes" TEXT,
+    "forceFieldCurrent" INTEGER NOT NULL DEFAULT 0,
+    "forceFieldMax" INTEGER NOT NULL DEFAULT 0,
+    "energyCurrent" INTEGER NOT NULL DEFAULT 0,
+    "energyMax" INTEGER NOT NULL DEFAULT 0,
+    "embeddedAi" TEXT,
+    "capabilities" JSONB NOT NULL DEFAULT '[]',
+    "description" TEXT,
+    "foundryData" JSONB,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
@@ -106,13 +118,16 @@ CREATE TABLE "MetaArmor" (
 CREATE TABLE "EquipmentItem" (
     "id" TEXT NOT NULL,
     "characterId" TEXT NOT NULL,
+    "category" "EquipmentCategory" NOT NULL,
+    "sourceType" TEXT,
     "name" TEXT NOT NULL,
-    "slot" "EquipmentSlot" NOT NULL DEFAULT 'OTHER',
-    "quantity" INTEGER NOT NULL DEFAULT 1,
+    "sortOrder" INTEGER NOT NULL DEFAULT 0,
     "equipped" BOOLEAN NOT NULL DEFAULT false,
-    "tags" TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
-    "bonuses" JSONB NOT NULL DEFAULT '{}',
+    "quantity" INTEGER NOT NULL DEFAULT 1,
     "description" TEXT,
+    "tags" TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+    "foundryItemId" TEXT,
+    "foundryData" JSONB,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
@@ -123,13 +138,15 @@ CREATE TABLE "EquipmentItem" (
 CREATE TABLE "ProgressionBlock" (
     "id" TEXT NOT NULL,
     "characterId" TEXT NOT NULL,
-    "blockNumber" INTEGER NOT NULL,
-    "title" TEXT NOT NULL,
-    "category" TEXT NOT NULL,
+    "sortOrder" INTEGER NOT NULL,
+    "label" TEXT NOT NULL,
+    "category" "ProgressionCategory" NOT NULL DEFAULT 'OTHER',
+    "targetKey" TEXT,
     "bonusValue" INTEGER NOT NULL DEFAULT 1,
     "costXp" INTEGER NOT NULL DEFAULT 0,
     "status" "ProgressionStatus" NOT NULL DEFAULT 'AVAILABLE',
-    "note" TEXT,
+    "source" TEXT DEFAULT 'manual',
+    "notes" TEXT,
     "spentAt" TIMESTAMP(3),
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
@@ -143,9 +160,12 @@ CREATE TABLE "EvolutionEntry" (
     "characterId" TEXT NOT NULL,
     "progressionBlockId" TEXT,
     "kind" "EvolutionKind" NOT NULL,
-    "title" TEXT NOT NULL,
+    "targetKey" TEXT,
+    "label" TEXT NOT NULL,
+    "initialValue" TEXT,
+    "currentValue" TEXT,
+    "gainValue" TEXT,
     "description" TEXT,
-    "xpCost" INTEGER NOT NULL DEFAULT 0,
     "appliedAt" TIMESTAMP(3),
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
@@ -161,6 +181,8 @@ CREATE TABLE "FoundryImport" (
     "importedById" TEXT,
     "fileName" TEXT,
     "actorId" TEXT,
+    "actorName" TEXT,
+    "callsign" TEXT,
     "sourceVersion" TEXT,
     "status" "ImportStatus" NOT NULL DEFAULT 'PENDING',
     "rawJson" JSONB NOT NULL,
@@ -182,19 +204,28 @@ CREATE UNIQUE INDEX "Campaign_slug_key" ON "Campaign"("slug");
 CREATE UNIQUE INDEX "Character_foundryActorId_key" ON "Character"("foundryActorId");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "Character_campaignId_slug_key" ON "Character"("campaignId", "slug");
+
+-- CreateIndex
 CREATE INDEX "Character_campaignId_idx" ON "Character"("campaignId");
 
 -- CreateIndex
 CREATE INDEX "Character_playerUserId_idx" ON "Character"("playerUserId");
 
 -- CreateIndex
+CREATE INDEX "Character_callsign_idx" ON "Character"("callsign");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "MetaArmor_characterId_key" ON "MetaArmor"("characterId");
 
 -- CreateIndex
-CREATE INDEX "EquipmentItem_characterId_idx" ON "EquipmentItem"("characterId");
+CREATE INDEX "EquipmentItem_characterId_category_sortOrder_idx" ON "EquipmentItem"("characterId", "category", "sortOrder");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "ProgressionBlock_characterId_blockNumber_key" ON "ProgressionBlock"("characterId", "blockNumber");
+CREATE INDEX "EquipmentItem_foundryItemId_idx" ON "EquipmentItem"("foundryItemId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "ProgressionBlock_characterId_sortOrder_key" ON "ProgressionBlock"("characterId", "sortOrder");
 
 -- CreateIndex
 CREATE INDEX "ProgressionBlock_characterId_status_idx" ON "ProgressionBlock"("characterId", "status");

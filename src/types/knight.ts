@@ -31,6 +31,13 @@ export type CharacteristicEntry = {
   value: number | string;
 };
 
+export type AspectGroup = {
+  key: string;
+  label: string;
+  value: number | string;
+  characteristics: CharacteristicEntry[];
+};
+
 export type SkillScore = {
   key: string;
   label: string;
@@ -41,17 +48,33 @@ export type SkillScore = {
 export type KnightCharacter = {
   id: string;
   name: string;
+  callsign: string;
+  portraitUrl?: string;
+  age: string;
   codename: string;
   playerName: string;
   archetype: string;
+  section: string;
+  blazon: string;
+  feat: string;
   rank: string;
   order: string;
   quote: string;
   biography: string;
+  description: string;
+  history: string;
+  motivations: string;
+  languages: string[];
+  distinctions: string[];
   health: Gauge;
-  energy: Gauge;
   hope: Gauge;
+  heroism: Gauge;
+  aegis: number;
+  defense: number;
+  reaction: number;
+  energy: Gauge;
   trauma: Gauge;
+  aspectGroups?: AspectGroup[];
   aspects?: AspectEntry[];
   characteristics?: CharacteristicEntry[];
   attributes: AttributeScore[];
@@ -116,6 +139,7 @@ export type EvolutionEntry = {
 
 export type FoundryKnightActor = {
   _id?: string;
+  img?: string;
   name: string;
   type: "knight";
   system?: Record<string, unknown>;
@@ -125,16 +149,32 @@ export type FoundryKnightActor = {
 
 export type KnightCharacterDraft = {
   name: string;
+  callsign?: string;
+  portraitUrl?: string;
+  age?: string;
   codename?: string;
   archetype?: string;
+  section?: string;
+  blazon?: string;
+  feat?: string;
   rank?: string;
   order?: string;
   quote?: string;
   biography?: string;
+  description?: string;
+  history?: string;
+  motivations?: string;
+  languages?: string[];
+  distinctions?: string[];
   health?: Gauge;
-  energy?: Gauge;
   hope?: Gauge;
+  heroism?: Gauge;
+  aegis?: number;
+  defense?: number;
+  reaction?: number;
+  energy?: Gauge;
   trauma?: Gauge;
+  aspectGroups?: AspectGroup[];
   aspects?: AspectEntry[];
   characteristics?: CharacteristicEntry[];
   metaArmor?: MetaArmor | null;
