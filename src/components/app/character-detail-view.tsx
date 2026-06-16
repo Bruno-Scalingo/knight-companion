@@ -118,7 +118,7 @@ function buildImportedCharacterData(record: ImportedKnightCharacter): ResolvedCh
     },
     metaArmor: draft.metaArmor ?? null,
     equipment: draft.equipment ?? [],
-    progression: [],
+    progression: draft.progression ?? [],
     evolution: [],
     importedRecord: record
   };

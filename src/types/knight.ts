@@ -139,6 +139,7 @@ export type KnightCharacterDraft = {
   characteristics?: CharacteristicEntry[];
   metaArmor?: MetaArmor | null;
   equipment?: EquipmentItem[];
+  progression?: ProgressionBlock[];
   attributes: AttributeScore[];
   skills: SkillScore[];
   rawFoundryActorId?: string;

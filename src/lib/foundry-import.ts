@@ -5,7 +5,9 @@ import type {
   FoundryKnightActor,
   Gauge,
   KnightCharacterDraft,
-  MetaArmor
+  MetaArmor,
+  ProgressionBlock,
+  SkillScore
 } from "@/types/knight";
 
 function readRecord(value: unknown): Record<string, unknown> {
@@ -31,6 +33,10 @@ function humanizeKey(key: string) {
     .replace(/\s+/g, " ")
     .trim()
     .replace(/^./, (char) => char.toUpperCase());
+}
+
+function stripHtml(value: string) {
+  return value.replace(/<[^>]*>/g, " ").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim();
 }
 
 function readPath(source: Record<string, unknown>, path: string[]) {
@@ -119,6 +125,16 @@ function parseGauge(source: Record<string, unknown>, paths: string[][], fallback
   };
 }
 
+function normalizeFlatGauge(record: Record<string, unknown>, fallbackCurrent = 0): Gauge {
+  const current = pickFirstNumber(record, [["value"], ["current"]], fallbackCurrent);
+  const explicitMax = pickFirstNumber(record, [["max"], ["base"]], 0);
+
+  return {
+    current,
+    max: explicitMax > 0 ? explicitMax : Math.max(current, fallbackCurrent)
+  };
+}
+
 function parseTextEntries(source: Record<string, unknown>, paths: string[][]): AspectEntry[] {
   const record = pickFirstRecord(source, paths);
 
@@ -135,6 +151,22 @@ function parseTextEntries(source: Record<string, unknown>, paths: string[][]): A
       };
     })
     .filter((entry) => entry.value.length > 0);
+}
+
+function parseKnightAspects(source: Record<string, unknown>): AspectEntry[] {
+  const aspects = pickFirstRecord(source, [["aspects"]]);
+
+  return Object.entries(aspects).map(([key, value]) => {
+    const entry = readRecord(value);
+    const description = pickFirstString(entry, [["description"]]);
+    const summary = [`Base ${pickFirstNumber(entry, [["base"]], 0)}`, `Actuel ${pickFirstNumber(entry, [["value"]], 0)}`];
+
+    return {
+      key,
+      label: humanizeKey(key),
+      value: description ? `${summary.join(" · ")} · ${stripHtml(description)}` : summary.join(" · ")
+    };
+  });
 }
 
 function parseCharacteristicEntries(source: Record<string, unknown>, paths: string[][]): CharacteristicEntry[] {
@@ -160,6 +192,88 @@ function parseCharacteristicEntries(source: Record<string, unknown>, paths: stri
           };
     })
     .filter((entry): entry is CharacteristicEntry => entry !== null);
+}
+
+function parseKnightCharacteristics(source: Record<string, unknown>): CharacteristicEntry[] {
+  const aspects = pickFirstRecord(source, [["aspects"]]);
+
+  return Object.entries(aspects).flatMap(([aspectKey, aspectValue]) => {
+    const aspectRecord = readRecord(aspectValue);
+    const characteristics = readRecord(aspectRecord.caracteristiques);
+
+    return Object.entries(characteristics).map(([characteristicKey, characteristicValue]) => {
+      const characteristicRecord = readRecord(characteristicValue);
+      const base = pickFirstNumber(characteristicRecord, [["base"]], 0);
+      const bonus = pickFirstNumber(readRecord(characteristicRecord.bonus), [["user"]], 0);
+      const malus = pickFirstNumber(readRecord(characteristicRecord.malus), [["user"]], 0);
+      const current = pickFirstNumber(characteristicRecord, [["value"]], 0);
+      const total = base + current + bonus - malus;
+
+      return {
+        key: characteristicKey,
+        label: `${humanizeKey(characteristicKey)} (${humanizeKey(aspectKey)})`,
+        value: total
+      };
+    });
+  });
+}
+
+function parseKnightAttributes(source: Record<string, unknown>) {
+  const aspects = pickFirstRecord(source, [["aspects"]]);
+
+  return Object.entries(aspects).map(([key, value]) => {
+    const entry = readRecord(value);
+    return {
+      key,
+      label: humanizeKey(key),
+      value: pickFirstNumber(entry, [["base"]], 0) + pickFirstNumber(entry, [["value"]], 0)
+    };
+  });
+}
+
+function parseKnightSkills(source: Record<string, unknown>): SkillScore[] {
+  const aspects = pickFirstRecord(source, [["aspects"]]);
+
+  return Object.entries(aspects).flatMap(([aspectKey, aspectValue]) => {
+    const aspectRecord = readRecord(aspectValue);
+    const characteristics = readRecord(aspectRecord.caracteristiques);
+
+    return Object.entries(characteristics).map(([characteristicKey, characteristicValue]) => {
+      const entry = readRecord(characteristicValue);
+      const overdrive = pickFirstNumber(readRecord(entry.overdrive), [["value"]], 0);
+      const bonus = pickFirstNumber(readRecord(entry.bonus), [["user"]], 0);
+      const malus = pickFirstNumber(readRecord(entry.malus), [["user"]], 0);
+      const total = pickFirstNumber(entry, [["base"]], 0) + pickFirstNumber(entry, [["value"]], 0) + overdrive + bonus - malus;
+
+      return {
+        key: characteristicKey,
+        label: humanizeKey(characteristicKey),
+        value: total,
+        attribute: humanizeKey(aspectKey)
+      };
+    });
+  });
+}
+
+function parseKnightProgression(source: Record<string, unknown>): ProgressionBlock[] {
+  const progression = pickFirstRecord(source, [["progression", "experience", "depense", "liste"]]);
+
+  return Object.entries(progression)
+    .map(([id, value]) => {
+      const entry = readRecord(value);
+      const bonusValue = Math.max(1, pickFirstNumber(entry, [["bonus"]], 1));
+
+      return {
+        id: `progression-${id}`,
+        title: `+${bonusValue} ${humanizeKey(pickFirstString(entry, [["nom"]], id))}`,
+        category: "competence" as const,
+        bonusValue: 1,
+        costXp: pickFirstNumber(entry, [["cout"]], 0),
+        status: "spent" as const,
+        note: `Achat Foundry: ${pickFirstString(entry, [["nom"]], id)}`
+      };
+    })
+    .filter((entry) => entry.costXp > 0);
 }
 
 function normalizeEquipmentItem(item: Record<string, unknown>, index: number): EquipmentItem {
@@ -192,48 +306,57 @@ function normalizeEquipmentItem(item: Record<string, unknown>, index: number): E
     quantity: pickFirstNumber(system, [["quantity"], ["qty"], ["count"]], 1),
     equipped: readBoolean(system.equipped, false) || readBoolean(readRecord(system.equipped).value, false),
     tags,
-    description: pickFirstString(
+    description: stripHtml(
+      pickFirstString(
       { descriptionRecord, system },
       [["descriptionRecord", "value"], ["descriptionRecord", "text"], ["system", "resume"], ["system", "summary"]],
       "Aucune description fournie."
+      )
     )
   };
 }
 
-function parseMetaArmor(source: Record<string, unknown>): MetaArmor | null {
-  const metaArmor = pickFirstRecord(source, [
-    ["metaArmor"],
-    ["metaarmor"],
-    ["armor"],
-    ["armure"],
-    ["mecha"],
-    ["suit"]
-  ]);
+function parseMetaArmorFromItems(items: Record<string, unknown>[], system: Record<string, unknown>): MetaArmor | null {
+  const armorItem = items.find((item) => pickFirstString(item, [["type"]]).toLowerCase() === "armure");
 
-  if (Object.keys(metaArmor).length === 0) {
+  if (!armorItem) {
     return null;
   }
 
+  const metaArmor = readRecord(armorItem.system);
+  const capacities = readRecord(metaArmor.capacites);
+  const selectedCapacities = readRecord(capacities.selected);
+  const slots = readRecord(metaArmor.slots);
+
   return {
-    id: pickFirstString(metaArmor, [["_id"], ["id"]], "import-meta-armor"),
-    name: pickFirstString(metaArmor, [["name"], ["label"]], "Méta-armure importée"),
-    frame: pickFirstString(metaArmor, [["frame"], ["chassis"], ["type"]], "Non renseigné"),
-    generation: pickFirstString(metaArmor, [["generation"], ["gen"]], "Non renseignée"),
-    armorPoints: parseGauge(metaArmor, [["armor"], ["armure"], ["resistance"]], { current: 0, max: 0 }),
-    shieldPoints: parseGauge(metaArmor, [["shield"], ["bouclier"]], { current: 0, max: 0 }),
-    overdrive: parseGauge(metaArmor, [["overdrive"], ["drive"]], { current: 0, max: 0 }),
-    slots: Object.entries(pickFirstRecord(metaArmor, [["slots"], ["modules"], ["emplacements"]])).map(([key, value]) => ({
+    id: pickFirstString(armorItem, [["_id"], ["id"]], "import-meta-armor"),
+    name: pickFirstString(armorItem, [["name"]], "Méta-armure importée"),
+    frame: pickFirstString(metaArmor, [["description"]], "Non renseigné"),
+    generation: String(pickFirstNumber(metaArmor, [["generation"]], 0) || "Non renseignée"),
+    armorPoints: {
+      current: pickFirstNumber(system, [["armure", "value"]], 0),
+      max: pickFirstNumber(metaArmor, [["armure", "base"]], 0)
+    },
+    shieldPoints: {
+      current: pickFirstNumber(system, [["champDeForce", "value"]], 0),
+      max: pickFirstNumber(metaArmor, [["champDeForce", "base"]], 0)
+    },
+    overdrive: {
+      current: pickFirstNumber(system, [["flux", "value"]], 0),
+      max: 0
+    },
+    slots: Object.entries(slots).map(([key, value]) => ({
       key,
       label: humanizeKey(key),
-      occupiedBy: typeof readCollectionValue(value) === "string" ? String(readCollectionValue(value)) : undefined
+      occupiedBy: `Slots ${pickFirstNumber(readRecord(value), [["value"]], 0)}`
     })),
-    systems: Object.entries(pickFirstRecord(metaArmor, [["systems"], ["systemes"]])).map(([key, value], index) => {
+    systems: Object.entries(selectedCapacities).map(([key, value], index) => {
       const entryRecord = readRecord(value);
       return {
-        id: pickFirstString(entryRecord, [["_id"], ["id"]], `import-system-${index}`),
-        name: pickFirstString(entryRecord, [["name"], ["label"]], humanizeKey(key)),
+        id: `import-system-${index}`,
+        name: pickFirstString(entryRecord, [["label"]], humanizeKey(key)),
         status: "online" as const,
-        description: pickFirstString(entryRecord, [["description"], ["text"], ["value"]], "Système importé.")
+        description: stripHtml(pickFirstString(entryRecord, [["description"]], "Système importé."))
       };
     })
   };
@@ -287,53 +410,40 @@ export function validateFoundryKnightActor(input: unknown): FoundryActorValidati
 
 export function normalizeFoundryKnightActor(actor: FoundryKnightActor): KnightCharacterDraft {
   const system = readRecord(actor.system);
-  const attributes = readRecord(system.attributes);
-  const skills = readRecord(system.skills);
   const items = Array.isArray(actor.items) ? actor.items.map((item) => readRecord(item)) : [];
-  const aspects = parseTextEntries(system, [
-    ["aspects"],
-    ["aspect"],
-    ["traits"],
-    ["descriptors"],
-    ["bio", "aspects"],
-    ["description", "aspects"]
-  ]);
-  const characteristics = parseCharacteristicEntries(system, [
-    ["characteristics"],
-    ["caracteristiques"],
-    ["caracteristics"],
-    ["characteristic"],
-    ["attributes"]
-  ]);
+  const aspects = parseKnightAspects(system);
+  const characteristics = parseKnightCharacteristics(system);
+  const attributes = parseKnightAttributes(system);
+  const skills = parseKnightSkills(system);
+  const progression = parseKnightProgression(system);
+  const equipment = items
+    .filter((item) => {
+      const type = pickFirstString(item, [["type"]]).toLowerCase();
+      return ["arme", "module", "avantage", "inconvenient", "blessure", "distinction"].includes(type);
+    })
+    .map(normalizeEquipmentItem);
 
   return {
     name: actor.name,
-    codename: pickFirstString(system, [["codename"], ["callsign"], ["alias"]]),
+    codename: pickFirstString(system, [["surnom"], ["codename"], ["callsign"], ["alias"]]),
     archetype: pickFirstString(system, [["archetype"], ["role"], ["class"]]),
     rank: pickFirstString(system, [["rank"], ["grade"]], "Écuyer"),
-    order: pickFirstString(system, [["order"], ["section"], ["organization"]]),
+    order: pickFirstString(system, [["section"], ["order"], ["organization"]]),
     quote: pickFirstString(system, [["quote"], ["citation"]]),
-    biography: pickFirstString(system, [["biography"], ["background"], ["history"], ["description"]]),
-    health: parseGauge(system, [["health"], ["hp"], ["sante"]], { current: 0, max: 0 }),
-    energy: parseGauge(system, [["energy"], ["energie"]], { current: 0, max: 0 }),
-    hope: parseGauge(system, [["hope"], ["espoir"]], { current: 0, max: 0 }),
+    biography: stripHtml(
+      pickFirstString(system, [["histoire"], ["biography"], ["background"], ["history"], ["description"]])
+    ),
+    health: normalizeFlatGauge(readRecord(system.sante)),
+    energy: normalizeFlatGauge(readRecord(system.energie)),
+    hope: normalizeFlatGauge(readRecord(system.espoir)),
     trauma: parseGauge(system, [["trauma"]], { current: 0, max: 0 }),
     aspects,
     characteristics,
-    metaArmor: parseMetaArmor(system),
-    equipment: items.map(normalizeEquipmentItem),
+    metaArmor: parseMetaArmorFromItems(items, system),
+    equipment,
+    progression,
     rawFoundryActorId: actor._id,
-    attributes: [
-      { key: "force", label: "Force", value: pickFirstNumber(attributes, [["force", "value"], ["force"]], 1) },
-      { key: "agilite", label: "Agilité", value: pickFirstNumber(attributes, [["agilite", "value"], ["agility", "value"], ["agilite"], ["agility"]], 1) },
-      { key: "esprit", label: "Esprit", value: pickFirstNumber(attributes, [["esprit", "value"], ["spirit", "value"], ["esprit"], ["spirit"]], 1) },
-      { key: "aura", label: "Aura", value: pickFirstNumber(attributes, [["aura", "value"], ["aura"]], 1) }
-    ],
-    skills: [
-      { key: "combat", label: "Combat", value: pickFirstNumber(skills, [["combat", "value"], ["combat"]], 0), attribute: "Force" },
-      { key: "tir", label: "Tir", value: pickFirstNumber(skills, [["tir", "value"], ["shoot", "value"], ["tir"], ["shoot"]], 0), attribute: "Agilité" },
-      { key: "technique", label: "Technique", value: pickFirstNumber(skills, [["technique", "value"], ["tech", "value"], ["technique"], ["tech"]], 0), attribute: "Esprit" },
-      { key: "influence", label: "Influence", value: pickFirstNumber(skills, [["influence", "value"], ["influence"]], 0), attribute: "Aura" }
-    ]
+    attributes,
+    skills
   };
 }
