@@ -18,8 +18,49 @@ function readNestedValue(source: Record<string, unknown>, key: string) {
 }
 
 export function isFoundryKnightActor(input: unknown): input is FoundryKnightActor {
+  return validateFoundryKnightActor(input).valid;
+}
+
+export type FoundryActorValidationResult =
+  | {
+      valid: true;
+      actor: FoundryKnightActor;
+    }
+  | {
+      valid: false;
+      message: string;
+    };
+
+export function validateFoundryKnightActor(input: unknown): FoundryActorValidationResult {
   const actor = readRecord(input);
-  return typeof actor.name === "string" && typeof actor.type === "string";
+
+  if (Object.keys(actor).length === 0) {
+    return {
+      valid: false,
+      message: "Le fichier JSON doit contenir un objet Foundry Actor."
+    };
+  }
+
+  if (typeof actor.name !== "string" || actor.name.trim().length === 0) {
+    return {
+      valid: false,
+      message: 'Acteur Foundry invalide: le champ "name" est obligatoire.'
+    };
+  }
+
+  if (actor.type !== "knight") {
+    const receivedType = typeof actor.type === "string" ? actor.type : "absent";
+
+    return {
+      valid: false,
+      message: `Acteur Foundry invalide: type "${receivedType}" reçu, type "knight" attendu.`
+    };
+  }
+
+  return {
+    valid: true,
+    actor: input as FoundryKnightActor
+  };
 }
 
 export function normalizeFoundryKnightActor(actor: FoundryKnightActor): KnightCharacterDraft {

@@ -48,7 +48,7 @@ export function DashboardShell({ children }: DashboardShellProps) {
           <div className="flex min-w-max gap-2">
             {tabs.map((tab) => {
               const Icon = tab.icon;
-              const active = pathname === tab.href;
+              const active = pathname === tab.href || pathname.startsWith(`${tab.href}/`);
 
               return (
                 <Link

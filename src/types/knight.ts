@@ -103,7 +103,7 @@ export type EvolutionEntry = {
 export type FoundryKnightActor = {
   _id?: string;
   name: string;
-  type: "character" | "pnj" | string;
+  type: "knight";
   system?: Record<string, unknown>;
   items?: Array<Record<string, unknown>>;
   flags?: Record<string, unknown>;
@@ -117,4 +117,11 @@ export type KnightCharacterDraft = {
   attributes: AttributeScore[];
   skills: SkillScore[];
   rawFoundryActorId?: string;
+};
+
+export type ImportedKnightCharacter = {
+  importedAt: string;
+  sourceFileName?: string;
+  actor: FoundryKnightActor;
+  character: KnightCharacterDraft;
 };
