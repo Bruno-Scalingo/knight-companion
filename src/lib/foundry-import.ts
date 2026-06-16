@@ -261,16 +261,16 @@ function parseKnightProgression(source: Record<string, unknown>): ProgressionBlo
   return Object.entries(progression)
     .map(([id, value]) => {
       const entry = readRecord(value);
-      const bonusValue = Math.max(1, pickFirstNumber(entry, [["bonus"]], 1));
+      const displayBonusValue = Math.max(1, pickFirstNumber(entry, [["bonus"]], 1));
 
       return {
         id: `progression-${id}`,
-        title: `+${bonusValue} ${humanizeKey(pickFirstString(entry, [["nom"]], id))}`,
+        title: `+${displayBonusValue} ${humanizeKey(pickFirstString(entry, [["nom"]], id))}`,
         category: "competence" as const,
-        bonusValue: 1,
+        bonusValue: 1 as const,
         costXp: pickFirstNumber(entry, [["cout"]], 0),
         status: "spent" as const,
-        note: `Achat Foundry: ${pickFirstString(entry, [["nom"]], id)}`
+        note: `Achat Foundry: ${pickFirstString(entry, [["nom"]], id)} (+${displayBonusValue})`
       };
     })
     .filter((entry) => entry.costXp > 0);
