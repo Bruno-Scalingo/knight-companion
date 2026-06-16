@@ -11,17 +11,17 @@ import { cn } from "@/lib/utils";
 
 const defaultCharacterRoute = "/personnages/char-ariane" as Route;
 
-const tabs: Array<{
-  href: Route;
+const tabDefinitions: Array<{
+  key: string;
+  suffix: "" | "/meta-armure" | "/equipement" | "/progression" | "/evolution";
   label: string;
-  activePrefix?: string;
   icon: ComponentType<{ className?: string; "aria-hidden"?: boolean }>;
 }> = [
-  { href: defaultCharacterRoute, label: "Personnage", activePrefix: "/personnages", icon: UserRound },
-  { href: "/meta-armure", label: "Méta-armure", icon: Shield },
-  { href: "/equipement", label: "Équipement", icon: Swords },
-  { href: "/progression", label: "Progression", icon: TrendingUp },
-  { href: "/evolution", label: "Évolution", icon: WandSparkles }
+  { key: "personnage", suffix: "", label: "Personnage", icon: UserRound },
+  { key: "meta-armure", suffix: "/meta-armure", label: "Méta-armure", icon: Shield },
+  { key: "equipement", suffix: "/equipement", label: "Équipement", icon: Swords },
+  { key: "progression", suffix: "/progression", label: "Progression", icon: TrendingUp },
+  { key: "evolution", suffix: "/evolution", label: "Évolution", icon: WandSparkles }
 ];
 
 type DashboardShellProps = {
@@ -30,6 +30,13 @@ type DashboardShellProps = {
 
 export function DashboardShell({ children }: DashboardShellProps) {
   const pathname = usePathname();
+  const pathSegments = pathname.split("/").filter(Boolean);
+  const characterId = pathSegments[0] === "personnages" && pathSegments[1] ? pathSegments[1] : null;
+  const characterBaseRoute = (characterId ? `/personnages/${characterId}` : defaultCharacterRoute) as Route;
+  const tabs = tabDefinitions.map((tab) => ({
+    ...tab,
+    href: `${characterBaseRoute}${tab.suffix}` as Route
+  }));
 
   return (
     <div className="min-h-screen surface-grid">
@@ -51,8 +58,10 @@ export function DashboardShell({ children }: DashboardShellProps) {
           <div className="flex min-w-max gap-2">
             {tabs.map((tab) => {
               const Icon = tab.icon;
-              const activePrefix = tab.activePrefix ?? tab.href;
-              const active = pathname === tab.href || pathname.startsWith(`${activePrefix}/`);
+              const active =
+                tab.suffix === ""
+                  ? pathname === tab.href
+                  : pathname === tab.href || pathname.startsWith(`${tab.href}/`);
 
               return (
                 <Link

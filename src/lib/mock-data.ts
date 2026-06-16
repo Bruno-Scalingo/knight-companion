@@ -21,6 +21,14 @@ export const mockCharacter: KnightCharacter = {
   energy: { current: 8, max: 12 },
   hope: { current: 5, max: 7 },
   trauma: { current: 1, max: 5 },
+  aspects: [
+    { key: "dominant", label: "Dominant", value: "Stratège calme" },
+    { key: "faille", label: "Faille", value: "Refuse de laisser quelqu'un derrière elle" }
+  ],
+  characteristics: [
+    { key: "chair", label: "Chair", value: 4 },
+    { key: "machine", label: "Machine", value: 3 }
+  ],
   attributes: [
     { key: "force", label: "Force", value: 3 },
     { key: "agilite", label: "Agilité", value: 4 },

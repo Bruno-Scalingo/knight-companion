@@ -19,6 +19,18 @@ export type AttributeScore = {
   value: number;
 };
 
+export type AspectEntry = {
+  key: string;
+  label: string;
+  value: string;
+};
+
+export type CharacteristicEntry = {
+  key: string;
+  label: string;
+  value: number | string;
+};
+
 export type SkillScore = {
   key: string;
   label: string;
@@ -40,6 +52,8 @@ export type KnightCharacter = {
   energy: Gauge;
   hope: Gauge;
   trauma: Gauge;
+  aspects?: AspectEntry[];
+  characteristics?: CharacteristicEntry[];
   attributes: AttributeScore[];
   skills: SkillScore[];
 };
@@ -114,6 +128,17 @@ export type KnightCharacterDraft = {
   codename?: string;
   archetype?: string;
   rank?: string;
+  order?: string;
+  quote?: string;
+  biography?: string;
+  health?: Gauge;
+  energy?: Gauge;
+  hope?: Gauge;
+  trauma?: Gauge;
+  aspects?: AspectEntry[];
+  characteristics?: CharacteristicEntry[];
+  metaArmor?: MetaArmor | null;
+  equipment?: EquipmentItem[];
   attributes: AttributeScore[];
   skills: SkillScore[];
   rawFoundryActorId?: string;
