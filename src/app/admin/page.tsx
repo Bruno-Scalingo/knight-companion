@@ -1,4 +1,5 @@
 import Link from "next/link";
+import type { Route } from "next";
 import { ArrowLeft, Database, ShieldCheck, UserCog } from "lucide-react";
 
 import { AccessBanner } from "@/components/app/access-banner";
@@ -11,13 +12,15 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { adminAccess } from "@/lib/access";
 
+const defaultCharacterRoute = "/personnages/char-ariane" as Route;
+
 export default function AdminPage() {
   return (
     <main className="min-h-screen surface-grid">
       <div className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6 lg:px-8">
         <div className="mb-6">
           <Button asChild variant="outline">
-            <Link href="/personnage">
+            <Link href={defaultCharacterRoute}>
               <ArrowLeft className="h-4 w-4" aria-hidden="true" />
               Retour à la fiche
             </Link>

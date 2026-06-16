@@ -12,9 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { normalizeFoundryKnightActor, validateFoundryKnightActor } from "@/lib/foundry-import";
-import { saveImportedCharacter } from "@/lib/imported-character-store";
-
-const importedCharacterRoute = "/personnage/importe" as Route;
+import { createImportedCharacterId, saveImportedCharacter } from "@/lib/imported-character-store";
 
 function readFileAsText(file: File) {
   return new Promise<string>((resolve, reject) => {
@@ -93,17 +91,20 @@ export function FoundryImportPanel() {
       }
 
       const character = normalizeFoundryKnightActor(validation.actor);
+      const characterId = createImportedCharacterId(validation.actor._id, character.name);
+      const characterRoute = `/personnages/${characterId}` as Route;
 
       saveImportedCharacter({
+        id: characterId,
         importedAt: new Date().toISOString(),
         sourceFileName: selectedFile?.name,
         actor: validation.actor,
         character
       });
 
-      console.log("[Foundry Import] Import validé et stocké en session", character);
+      console.log("[Foundry Import] Import validé et stocké en session", { characterId, characterRoute, character });
       setSuccessMessage(`Import prêt pour ${character.name}. Redirection en cours.`);
-      router.push(importedCharacterRoute);
+      router.push(characterRoute);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Erreur inconnue pendant l'import.";
 

@@ -120,6 +120,7 @@ export type KnightCharacterDraft = {
 };
 
 export type ImportedKnightCharacter = {
+  id: string;
   importedAt: string;
   sourceFileName?: string;
   actor: FoundryKnightActor;

@@ -9,12 +9,15 @@ import type { ComponentType, ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
+const defaultCharacterRoute = "/personnages/char-ariane" as Route;
+
 const tabs: Array<{
   href: Route;
   label: string;
+  activePrefix?: string;
   icon: ComponentType<{ className?: string; "aria-hidden"?: boolean }>;
 }> = [
-  { href: "/personnage", label: "Personnage", icon: UserRound },
+  { href: defaultCharacterRoute, label: "Personnage", activePrefix: "/personnages", icon: UserRound },
   { href: "/meta-armure", label: "Méta-armure", icon: Shield },
   { href: "/equipement", label: "Équipement", icon: Swords },
   { href: "/progression", label: "Progression", icon: TrendingUp },
@@ -48,7 +51,8 @@ export function DashboardShell({ children }: DashboardShellProps) {
           <div className="flex min-w-max gap-2">
             {tabs.map((tab) => {
               const Icon = tab.icon;
-              const active = pathname === tab.href || pathname.startsWith(`${tab.href}/`);
+              const activePrefix = tab.activePrefix ?? tab.href;
+              const active = pathname === tab.href || pathname.startsWith(`${activePrefix}/`);
 
               return (
                 <Link
