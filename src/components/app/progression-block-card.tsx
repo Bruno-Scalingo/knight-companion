@@ -31,7 +31,7 @@ export function ProgressionBlockCard({ block }: ProgressionBlockCardProps) {
           <p className="mt-1 text-sm capitalize text-muted-foreground">{block.category}</p>
         </div>
         <Badge variant={block.status === "spent" ? "secondary" : block.status === "locked" ? "muted" : "accent"}>
-          <Icon className="mr-1 h-3.5 w-3.5" aria-hidden="true" />
+          <Icon className="mr-1 h-3.5 w-3.5" aria-hidden={true} />
           {statusCopy[block.status]}
         </Badge>
       </CardHeader>

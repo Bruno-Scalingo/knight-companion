@@ -38,7 +38,7 @@ export function DashboardShell({ children }: DashboardShellProps) {
           </div>
           <Button asChild variant="outline">
             <Link href="/admin">
-              <ClipboardList className="h-4 w-4" aria-hidden="true" />
+              <ClipboardList className="h-4 w-4" aria-hidden={true} />
               Administration
             </Link>
           </Button>
@@ -61,7 +61,7 @@ export function DashboardShell({ children }: DashboardShellProps) {
                       : "bg-muted text-muted-foreground hover:bg-accent hover:text-accent-foreground"
                   )}
                 >
-                  <Icon className="h-4 w-4" aria-hidden="true" />
+                  <Icon className="h-4 w-4" aria-hidden={true} />
                   {tab.label}
                 </Link>
               );

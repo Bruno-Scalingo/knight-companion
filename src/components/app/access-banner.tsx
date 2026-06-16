@@ -16,7 +16,7 @@ export function AccessBanner({ access }: AccessBannerProps) {
       <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3">
           <span className="flex h-9 w-9 items-center justify-center rounded-md bg-muted">
-            <Icon className="h-4 w-4" aria-hidden="true" />
+            <Icon className="h-4 w-4" aria-hidden={true} />
           </span>
           <div>
             <p className="text-sm font-semibold">{access.label}</p>
