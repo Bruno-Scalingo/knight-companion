@@ -1,0 +1,218 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  PLAYER
+}
+
+enum AccessScope {
+  READ_ONLY
+  EDIT
+}
+
+enum EquipmentSlot {
+  WEAPON
+  ARMOR
+  MODULE
+  RELIC
+  CONSUMABLE
+  OTHER
+}
+
+enum ProgressionStatus {
+  AVAILABLE
+  SPENT
+  LOCKED
+}
+
+enum EvolutionKind {
+  ATTRIBUTE
+  SKILL
+  ARMOR
+  EQUIPMENT
+  NARRATIVE
+}
+
+enum ImportStatus {
+  PENDING
+  PARSED
+  APPLIED
+  FAILED
+}
+
+model User {
+  id          String           @id @default(cuid())
+  email       String           @unique
+  name        String?
+  role        Role             @default(PLAYER)
+  memberships CampaignMember[]
+  characters  Character[]      @relation("PlayerCharacters")
+  imports     FoundryImport[]   @relation("ImportAuthor")
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+}
+
+model Campaign {
+  id         String           @id @default(cuid())
+  name       String
+  slug       String           @unique
+  members    CampaignMember[]
+  characters Character[]
+  imports    FoundryImport[]
+  createdAt  DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
+}
+
+model CampaignMember {
+  campaignId  String
+  userId      String
+  accessScope AccessScope @default(READ_ONLY)
+  campaign    Campaign    @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  @@id([campaignId, userId])
+}
+
+model Character {
+  id              String             @id @default(cuid())
+  campaignId      String
+  playerUserId    String?
+  name            String
+  codename        String?
+  archetype       String?
+  rank            String?
+  orderName       String?
+  quote           String?
+  biography       String?
+  glory           Int                @default(0)
+  healthCurrent   Int                @default(0)
+  healthMax       Int                @default(0)
+  energyCurrent   Int                @default(0)
+  energyMax       Int                @default(0)
+  hopeCurrent     Int                @default(0)
+  hopeMax         Int                @default(0)
+  traumaCurrent   Int                @default(0)
+  traumaMax       Int                @default(0)
+  attributes      Json               @default("{}")
+  skills          Json               @default("{}")
+  foundryActorId  String?            @unique
+  campaign        Campaign           @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  player          User?              @relation("PlayerCharacters", fields: [playerUserId], references: [id], onDelete: SetNull)
+  metaArmor       MetaArmor?
+  equipment       EquipmentItem[]
+  progression     ProgressionBlock[]
+  evolutions      EvolutionEntry[]
+  imports         FoundryImport[]
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  @@index([campaignId])
+  @@index([playerUserId])
+}
+
+model MetaArmor {
+  id             String    @id @default(cuid())
+  characterId    String    @unique
+  name           String
+  frame          String?
+  generation     String?
+  armorCurrent   Int       @default(0)
+  armorMax       Int       @default(0)
+  shieldCurrent  Int       @default(0)
+  shieldMax      Int       @default(0)
+  overdriveValue Int       @default(0)
+  overdriveMax   Int       @default(0)
+  slots          Json      @default("[]")
+  systems        Json      @default("[]")
+  notes          String?
+  character      Character @relation(fields: [characterId], references: [id], onDelete: Cascade)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+}
+
+model EquipmentItem {
+  id          String        @id @default(cuid())
+  characterId String
+  name        String
+  slot        EquipmentSlot @default(OTHER)
+  quantity    Int           @default(1)
+  equipped    Boolean       @default(false)
+  tags        String[]      @default([])
+  bonuses     Json          @default("{}")
+  description String?
+  character   Character     @relation(fields: [characterId], references: [id], onDelete: Cascade)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  @@index([characterId])
+}
+
+model ProgressionBlock {
+  id          String            @id @default(cuid())
+  characterId String
+  blockNumber Int
+  title       String
+  category    String
+  bonusValue  Int               @default(1)
+  costXp      Int               @default(0)
+  status      ProgressionStatus @default(AVAILABLE)
+  note        String?
+  spentAt     DateTime?
+  character   Character         @relation(fields: [characterId], references: [id], onDelete: Cascade)
+  evolutions  EvolutionEntry[]
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  @@unique([characterId, blockNumber])
+  @@index([characterId, status])
+}
+
+model EvolutionEntry {
+  id                 String            @id @default(cuid())
+  characterId        String
+  progressionBlockId String?
+  kind               EvolutionKind
+  title              String
+  description        String?
+  xpCost             Int               @default(0)
+  appliedAt          DateTime?
+  character          Character         @relation(fields: [characterId], references: [id], onDelete: Cascade)
+  progressionBlock   ProgressionBlock? @relation(fields: [progressionBlockId], references: [id], onDelete: SetNull)
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+
+  @@index([characterId])
+  @@index([progressionBlockId])
+}
+
+model FoundryImport {
+  id             String       @id @default(cuid())
+  campaignId     String
+  characterId    String?
+  importedById   String?
+  fileName       String?
+  actorId        String?
+  sourceVersion  String?
+  status         ImportStatus @default(PENDING)
+  rawJson        Json
+  normalizedJson Json?
+  errors         Json?
+  campaign       Campaign     @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  character      Character?   @relation(fields: [characterId], references: [id], onDelete: SetNull)
+  importedBy     User?        @relation("ImportAuthor", fields: [importedById], references: [id], onDelete: SetNull)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([campaignId])
+  @@index([characterId])
+  @@index([actorId])
+}

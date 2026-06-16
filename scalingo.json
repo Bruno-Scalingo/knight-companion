@@ -1,0 +1,28 @@
+{
+  "name": "knight-companion",
+  "description": "Compagnon de campagne pour Knight RPG, construit avec Next.js, TypeScript, Prisma et PostgreSQL.",
+  "repository": "https://github.com/Bruno-Scalingo/knight-companion",
+  "env": {
+    "NODE_ENV": {
+      "value": "production"
+    },
+    "NEXT_PUBLIC_APP_NAME": {
+      "value": "Knight Companion"
+    },
+    "DATABASE_URL": {
+      "description": "Alias Prisma vers l'addon PostgreSQL Scalingo.",
+      "value": "$SCALINGO_POSTGRESQL_URL"
+    }
+  },
+  "addons": [
+    {
+      "plan": "postgresql:postgresql-starter-512"
+    }
+  ],
+  "formation": {
+    "web": {
+      "amount": 1,
+      "size": "S"
+    }
+  }
+}

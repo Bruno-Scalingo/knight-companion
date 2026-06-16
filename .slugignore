@@ -1,0 +1,8 @@
+.git
+.github
+.next/cache
+coverage
+*.log
+.DS_Store
+outputs
+work
