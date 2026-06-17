@@ -56,6 +56,7 @@ export type KnightCharacter = {
   archetype: string;
   section: string;
   blazon: string;
+  blazonDetail: string;
   feat: string;
   rank: string;
   order: string;
@@ -64,6 +65,8 @@ export type KnightCharacter = {
   description: string;
   history: string;
   motivations: string;
+  primaryMotivation: string;
+  secondaryMotivations: string[];
   languages: string[];
   distinctions: string[];
   health: Gauge;
@@ -121,11 +124,16 @@ export type EquipmentItem = {
 export type ProgressionBlock = {
   id: string;
   title: string;
-  category: "attribut" | "competence" | "armure" | "ressource";
+  category: "aspect" | "attribut" | "competence" | "armure" | "ressource";
   bonusValue: 1;
   costXp: number;
   status: "available" | "spent" | "locked";
   note: string;
+  sourceId?: string;
+  sourceOrder?: number;
+  unitIndex?: number;
+  unitTotal?: number;
+  sourceCostXp?: number;
 };
 
 export type EvolutionEntry = {
@@ -156,6 +164,7 @@ export type KnightCharacterDraft = {
   archetype?: string;
   section?: string;
   blazon?: string;
+  blazonDetail?: string;
   feat?: string;
   rank?: string;
   order?: string;
@@ -164,6 +173,8 @@ export type KnightCharacterDraft = {
   description?: string;
   history?: string;
   motivations?: string;
+  primaryMotivation?: string;
+  secondaryMotivations?: string[];
   languages?: string[];
   distinctions?: string[];
   health?: Gauge;

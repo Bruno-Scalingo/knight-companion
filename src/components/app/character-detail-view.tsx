@@ -13,7 +13,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
-import { playerReadOnlyAccess } from "@/lib/access";
+import { adminAccess, canEdit, playerReadOnlyAccess } from "@/lib/access";
+import type { AccessContext } from "@/lib/access";
+import { normalizeFoundryKnightActor } from "@/lib/foundry-import";
 import { decodeHtmlEntities } from "@/lib/html-entities";
 import { readImportedCharacterById } from "@/lib/imported-character-store";
 import {
@@ -116,7 +118,10 @@ function decodeAspectGroups(groups: AspectGroup[] | undefined): AspectGroup[] {
 }
 
 function buildImportedCharacterData(record: ImportedKnightCharacter): ResolvedCharacterData {
-  const draft = record.character;
+  const draft = {
+    ...record.character,
+    ...normalizeFoundryKnightActor(record.actor)
+  };
 
   return {
     source: "imported",
@@ -131,6 +136,7 @@ function buildImportedCharacterData(record: ImportedKnightCharacter): ResolvedCh
       archetype: decodeText(draft.archetype),
       section: decodeText(draft.section ?? draft.order),
       blazon: decodeText(draft.blazon),
+      blazonDetail: decodeText(draft.blazonDetail),
       feat: decodeText(draft.feat),
       rank: decodeText(draft.rank),
       order: decodeText(draft.order),
@@ -139,6 +145,8 @@ function buildImportedCharacterData(record: ImportedKnightCharacter): ResolvedCh
       description: decodeText(draft.description),
       history: decodeText(draft.history ?? draft.biography),
       motivations: decodeText(draft.motivations),
+      primaryMotivation: decodeText(draft.primaryMotivation),
+      secondaryMotivations: decodeTextList(draft.secondaryMotivations),
       languages: decodeTextList(draft.languages),
       distinctions: decodeTextList(draft.distinctions),
       health: draft.health ?? { current: 0, max: 0 },
@@ -229,17 +237,19 @@ function CharacterHeader({
   title,
   description,
   data,
-  action
+  action,
+  access = playerReadOnlyAccess
 }: {
   title: string;
   description: string;
   data: ResolvedCharacterData;
   action?: ReactNode;
+  access?: AccessContext;
 }) {
   return (
     <>
       <PageHeading title={title} description={description} action={action} />
-      <AccessBanner access={playerReadOnlyAccess} />
+      <AccessBanner access={access} />
       {data.source === "imported" && data.importedRecord ? (
         <Card>
           <CardContent className="grid gap-3 p-4 text-sm sm:grid-cols-3">
@@ -345,8 +355,7 @@ function CharacterSummary({ data }: { data: ResolvedCharacterData }) {
             <IdentityField label="Âge" value={character.age} />
             <IdentityField label="Archétype" value={character.archetype} />
             <IdentityField label="Section" value={character.section || character.order} />
-            <IdentityField label="Blason" value={character.blazon} />
-            <IdentityField label="Haut-fait" value={character.feat} className="sm:col-span-2 xl:col-span-3" />
+            <IdentityField label="Haut-fait" value={character.feat} className="sm:col-span-2 xl:col-span-2" />
           </CardContent>
         </Card>
       </section>
@@ -417,26 +426,47 @@ function CharacterSummary({ data }: { data: ResolvedCharacterData }) {
         <Card>
           <CardHeader>
             <CardTitle>Biographie</CardTitle>
-            <CardDescription>Description, histoire et motivations.</CardDescription>
+            <CardDescription>Description et histoire du chevalier.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4 text-sm leading-6 text-muted-foreground">
             <BiographyBlock title="Description" value={character.description || fallbackBiography} />
             <BiographyBlock title="Histoire" value={character.history || fallbackBiography} />
-            <BiographyBlock title="Motivations" value={character.motivations} />
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader>
-            <CardTitle>Repères</CardTitle>
-            <CardDescription>Langues et distinctions.</CardDescription>
+            <CardTitle>Blason et motivations</CardTitle>
+            <CardDescription>Engagements personnels et symbole du chevalier.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-5">
-            <TagList title="Langues" values={character.languages} emptyLabel="Aucune langue importée." />
-            <TagList title="Distinctions" values={character.distinctions} emptyLabel="Aucune distinction importée." />
+            <BiographyBlock
+              title={`Blason${character.blazon ? ` : ${character.blazon}` : ""}`}
+              value={character.blazonDetail}
+            />
+            <BiographyBlock
+              title="Motivation principale"
+              value={character.primaryMotivation || character.motivations}
+            />
+            <TagList
+              title="Motivations secondaires"
+              values={character.secondaryMotivations}
+              emptyLabel="Aucune motivation secondaire importée."
+            />
           </CardContent>
         </Card>
       </section>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Repères</CardTitle>
+          <CardDescription>Langues et distinctions.</CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-5 md:grid-cols-2">
+          <TagList title="Langues" values={character.languages} emptyLabel="Aucune langue importée." />
+          <TagList title="Distinctions" values={character.distinctions} emptyLabel="Aucune distinction importée." />
+        </CardContent>
+      </Card>
     </>
   );
 }
@@ -687,6 +717,153 @@ export function CharacterEquipmentView({ characterId }: CharacterViewProps) {
   );
 }
 
+const progressionOrderStoragePrefix = "knight-companion:progression-order";
+
+function readStoredProgressionOrder(characterId: string) {
+  const rawOrder = window.localStorage.getItem(`${progressionOrderStoragePrefix}:${characterId}`);
+
+  if (!rawOrder) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(rawOrder);
+    return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === "string") : [];
+  } catch (error) {
+    console.error("[Progression] Impossible de relire l'ordre manuel", error);
+    return [];
+  }
+}
+
+function applyStoredProgressionOrder(characterId: string, blocks: ProgressionBlock[]) {
+  const storedOrder = readStoredProgressionOrder(characterId);
+
+  if (storedOrder.length === 0) {
+    return blocks;
+  }
+
+  const orderIndex = new Map(storedOrder.map((id, index) => [id, index]));
+
+  return [...blocks].sort((first, second) => {
+    const firstIndex = orderIndex.get(first.id);
+    const secondIndex = orderIndex.get(second.id);
+
+    if (firstIndex !== undefined && secondIndex !== undefined) {
+      return firstIndex - secondIndex;
+    }
+
+    if (firstIndex !== undefined) {
+      return -1;
+    }
+
+    if (secondIndex !== undefined) {
+      return 1;
+    }
+
+    return 0;
+  });
+}
+
+function saveProgressionOrder(characterId: string, blocks: ProgressionBlock[]) {
+  window.localStorage.setItem(
+    `${progressionOrderStoragePrefix}:${characterId}`,
+    JSON.stringify(blocks.map((block) => block.id))
+  );
+}
+
+function moveProgressionBlock(blocks: ProgressionBlock[], fromIndex: number, toIndex: number) {
+  const nextBlocks = [...blocks];
+  const [movedBlock] = nextBlocks.splice(fromIndex, 1);
+
+  if (!movedBlock) {
+    return blocks;
+  }
+
+  nextBlocks.splice(toIndex, 0, movedBlock);
+  return nextBlocks;
+}
+
+function ProgressionTimeline({
+  characterId,
+  progression,
+  access
+}: {
+  characterId: string;
+  progression: ProgressionBlock[];
+  access: AccessContext;
+}) {
+  const [orderedProgression, setOrderedProgression] = useState<ProgressionBlock[]>([]);
+  const canReorder = canEdit(access);
+  const spentXp = orderedProgression.reduce((total, block) => total + block.costXp, 0);
+  const sourceEntries = new Set(orderedProgression.map((block) => block.sourceId ?? block.id)).size;
+
+  useEffect(() => {
+    setOrderedProgression(applyStoredProgressionOrder(characterId, progression));
+  }, [characterId, progression]);
+
+  function handleMove(fromIndex: number, toIndex: number) {
+    setOrderedProgression((currentBlocks) => {
+      const nextBlocks = moveProgressionBlock(currentBlocks, fromIndex, toIndex);
+      saveProgressionOrder(characterId, nextBlocks);
+      console.log("[Progression] Ordre manuel sauvegardé", {
+        characterId,
+        order: nextBlocks.map((block) => block.id)
+      });
+      return nextBlocks;
+    });
+  }
+
+  if (orderedProgression.length === 0) {
+    return (
+      <Card>
+        <CardContent className="p-4 text-sm text-muted-foreground">
+          Aucune progression structurée n'a encore été importée pour ce personnage.
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <>
+      <section className="grid gap-4 sm:grid-cols-3">
+        <Card>
+          <CardHeader>
+            <CardDescription>Blocs +1</CardDescription>
+            <CardTitle>{orderedProgression.length}</CardTitle>
+          </CardHeader>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardDescription>Entrées Foundry</CardDescription>
+            <CardTitle>{sourceEntries}</CardTitle>
+          </CardHeader>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardDescription>PX dépensés</CardDescription>
+            <CardTitle>{spentXp}</CardTitle>
+          </CardHeader>
+        </Card>
+      </section>
+
+      <section className="space-y-3">
+        {orderedProgression.map((block, index) => (
+          <ProgressionBlockCard
+            key={block.id}
+            block={block}
+            canReorder={canReorder}
+            isFirst={index === 0}
+            isLast={index === orderedProgression.length - 1}
+            position={index + 1}
+            onMoveUp={() => handleMove(index, index - 1)}
+            onMoveDown={() => handleMove(index, index + 1)}
+          />
+        ))}
+      </section>
+    </>
+  );
+}
+
 export function CharacterProgressionView({ characterId }: CharacterViewProps) {
   const state = useResolvedCharacterData(characterId);
 
@@ -699,53 +876,18 @@ export function CharacterProgressionView({ characterId }: CharacterViewProps) {
   }
 
   const { data } = state;
-  const availableBlocks = data.progression.filter((block) => block.status === "available").length;
-  const spentXp = data.progression.filter((block) => block.status === "spent").reduce((total, block) => total + block.costXp, 0);
+  const access = adminAccess;
 
   return (
     <div className="space-y-6">
       <CharacterHeader
         title="Progression"
-        description="Améliorations +1 suivies par coût, disponibilité et validation."
+        description="Blocs +1 ordonnés chronologiquement pour suivre l'évolution du chevalier."
         data={data}
+        access={access}
       />
 
-      {data.progression.length > 0 ? (
-        <>
-          <section className="grid gap-4 sm:grid-cols-3">
-            <Card>
-              <CardHeader>
-                <CardDescription>Blocs disponibles</CardDescription>
-                <CardTitle>{availableBlocks}</CardTitle>
-              </CardHeader>
-            </Card>
-            <Card>
-              <CardHeader>
-                <CardDescription>PX dépensés</CardDescription>
-                <CardTitle>{spentXp}</CardTitle>
-              </CardHeader>
-            </Card>
-            <Card>
-              <CardHeader>
-                <CardDescription>Valeur d'un bloc</CardDescription>
-                <CardTitle>+1</CardTitle>
-              </CardHeader>
-            </Card>
-          </section>
-
-          <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            {data.progression.map((block) => (
-              <ProgressionBlockCard key={block.id} block={block} />
-            ))}
-          </section>
-        </>
-      ) : (
-        <Card>
-          <CardContent className="p-4 text-sm text-muted-foreground">
-            Aucune progression structurée n'a encore été importée pour ce personnage.
-          </CardContent>
-        </Card>
-      )}
+      <ProgressionTimeline characterId={characterId} progression={data.progression} access={access} />
     </div>
   );
 }

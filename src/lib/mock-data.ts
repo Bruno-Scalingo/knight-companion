@@ -16,6 +16,8 @@ export const mockCharacter: KnightCharacter = {
   archetype: "Chevalier tacticien",
   section: "Section Lyon",
   blazon: "Écu d'argent barré d'un sillage noir",
+  blazonDetail:
+    "Sillage porte un blason de coordination: une marque donnée aux chevaliers qui tiennent une ligne de repli sous pression.",
   feat: "Extraction de Verre Noir",
   rank: "Banneret",
   order: "Section Lyon",
@@ -27,6 +29,8 @@ export const mockCharacter: KnightCharacter = {
   history:
     "Ancienne logisticienne de crise, Ariane a été recrutée après avoir tenu une zone d'évacuation isolée pendant trente-six heures.",
   motivations: "Ramener tout le monde vivant, même quand le plan initial s'effondre.",
+  primaryMotivation: "Ramener tout le monde vivant.",
+  secondaryMotivations: ["Ne jamais abandonner une escouade isolée", "Prouver que la méthode sauve autant que le courage"],
   languages: ["Français", "Anglais", "Codes opérationnels Knight"],
   distinctions: ["Citation de Verre Noir", "Ruban de coordination d'escouade"],
   health: { current: 13, max: 16 },

@@ -21,6 +21,27 @@ const knightAspectLabels: Record<string, string> = {
   masque: "Masque"
 };
 
+const knightScoreLabels: Record<string, string> = {
+  ...knightAspectLabels,
+  deplacement: "Déplacement",
+  force: "Force",
+  endurance: "Endurance",
+  hargne: "Hargne",
+  combat: "Combat",
+  instinct: "Instinct",
+  tir: "Tir",
+  savoir: "Savoir",
+  technique: "Technique",
+  aura: "Aura",
+  parole: "Parole",
+  sangFroid: "Sang-froid",
+  discretion: "Discrétion",
+  dexterite: "Dextérité",
+  perception: "Perception"
+};
+
+const knightAspectKeys = new Set(["chair", "bete", "bête", "machine", "dame", "masque"]);
+
 function readRecord(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
 }
@@ -38,6 +59,10 @@ function readBoolean(value: unknown, fallback = false) {
 }
 
 function humanizeKey(key: string) {
+  if (knightScoreLabels[key]) {
+    return knightScoreLabels[key];
+  }
+
   return key
     .replace(/[_-]+/g, " ")
     .replace(/([a-z])([A-Z])/g, "$1 $2")
@@ -125,6 +150,48 @@ function pickFirstStringArray(source: Record<string, unknown>, paths: string[][]
   return [];
 }
 
+function uniqueStrings(values: string[]) {
+  return Array.from(new Set(values.map((value) => decodeHtmlEntities(value.trim())).filter((value) => value.length > 0)));
+}
+
+function parseItemNamesByType(items: Record<string, unknown>[], types: string[]) {
+  const normalizedTypes = new Set(types.map((type) => type.toLowerCase()));
+
+  return items
+    .filter((item) => normalizedTypes.has(pickFirstString(item, [["type"]]).toLowerCase()))
+    .map((item) => pickFirstString(item, [["name"]]))
+    .filter((name) => name.length > 0);
+}
+
+function parseMotivationItems(items: Record<string, unknown>[]) {
+  const motivationItems = items.filter(
+    (item) => pickFirstString(item, [["type"]]).toLowerCase() === "motivationmineure"
+  );
+  const secondaryMotivations: string[] = [];
+  let blazonDetail = "";
+
+  for (const item of motivationItems) {
+    const system = readRecord(item.system);
+    const description = stripHtml(pickFirstString(system, [["description"]], pickFirstString(item, [["name"]])));
+
+    if (description.length === 0) {
+      continue;
+    }
+
+    if (/blason/i.test(description)) {
+      blazonDetail = description;
+      continue;
+    }
+
+    secondaryMotivations.push(description);
+  }
+
+  return {
+    blazonDetail,
+    secondaryMotivations: uniqueStrings(secondaryMotivations)
+  };
+}
+
 function readCollectionValue(entry: unknown) {
   if (typeof entry === "string" || typeof entry === "number") {
     return entry;
@@ -172,6 +239,45 @@ function normalizeFlatGauge(record: Record<string, unknown>, fallbackCurrent = 0
     current,
     max: explicitMax > 0 ? explicitMax : Math.max(current, fallbackCurrent)
   };
+}
+
+function readGaugeAdjustment(record: Record<string, unknown>) {
+  const bonus = pickFirstNumber(readRecord(record.bonus), [["user"], ["value"]], 0);
+  const malus = pickFirstNumber(readRecord(record.malus), [["user"], ["value"]], 0);
+
+  return bonus - malus;
+}
+
+function normalizeHealthGauge(record: Record<string, unknown>, fallbackCurrent = 0): Gauge {
+  const current = pickFirstNumber(record, [["value"], ["current"]], fallbackCurrent);
+  const adjustedCurrent = Math.max(0, current + readGaugeAdjustment(record));
+  const explicitMax = pickFirstNumber(record, [["max"], ["base"]], 0);
+
+  return {
+    current: adjustedCurrent,
+    max: explicitMax > 0 ? explicitMax + readGaugeAdjustment(record) : adjustedCurrent
+  };
+}
+
+function normalizeHopeGauge(record: Record<string, unknown>, fallbackCurrent = 0): Gauge {
+  const current = pickFirstNumber(record, [["value"], ["current"]], fallbackCurrent);
+  const explicitMax = pickFirstNumber(record, [["max"], ["base"]], 0);
+  const maxBonus = Math.trunc(readGaugeAdjustment(record) / 2);
+  const computedMax = current + maxBonus;
+
+  return {
+    current,
+    max: explicitMax > 0 ? explicitMax + maxBonus : Math.max(current, computedMax)
+  };
+}
+
+function normalizeStaticScore(record: Record<string, unknown>, fallback = 0) {
+  const base = pickFirstNumber(record, [["base"]], 0);
+  const value = pickFirstNumber(record, [["value"], ["current"]], 0);
+  const mod = pickFirstNumber(record, [["mod"]], 0);
+  const score = base + value + mod + readGaugeAdjustment(record);
+
+  return score > 0 ? score : fallback;
 }
 
 function parseTextEntries(source: Record<string, unknown>, paths: string[][]): AspectEntry[] {
@@ -233,33 +339,27 @@ function parseCharacteristicEntries(source: Record<string, unknown>, paths: stri
     .filter((entry): entry is CharacteristicEntry => entry !== null);
 }
 
-function parseKnightCharacteristics(source: Record<string, unknown>): CharacteristicEntry[] {
-  const aspects = pickFirstRecord(source, [["aspects"]]);
+function parseKnightProgressionGains(source: Record<string, unknown>) {
+  const progression = pickFirstRecord(source, [["progression", "experience", "depense", "liste"]]);
+  const gains = new Map<string, number>();
 
-  return Object.entries(aspects).flatMap(([aspectKey, aspectValue]) => {
-    const aspectRecord = readRecord(aspectValue);
-    const characteristics = readRecord(aspectRecord.caracteristiques);
+  for (const value of Object.values(progression)) {
+    const entry = readRecord(value);
+    const key = pickFirstString(entry, [["nom"], ["caracteristique"]]).trim();
 
-    return Object.entries(characteristics).map(([characteristicKey, characteristicValue]) => {
-      const characteristicRecord = readRecord(characteristicValue);
-      const base = pickFirstNumber(characteristicRecord, [["base"]], 0);
-      const bonus = pickFirstNumber(readRecord(characteristicRecord.bonus), [["user"]], 0);
-      const malus = pickFirstNumber(readRecord(characteristicRecord.malus), [["user"]], 0);
-      const current = pickFirstNumber(characteristicRecord, [["value"]], 0);
-      const total = base + current + bonus - malus;
+    if (key.length === 0) {
+      continue;
+    }
 
-      return {
-        key: characteristicKey,
-        label: `${humanizeKey(characteristicKey)} (${humanizeKey(aspectKey)})`,
-        value: total
-      };
-    });
-  });
+    gains.set(key, (gains.get(key) ?? 0) + pickFirstNumber(entry, [["bonus"]], 0));
+  }
+
+  return gains;
 }
 
-function readKnightScore(entry: Record<string, unknown>) {
+function readKnightScore(entry: Record<string, unknown>, progressionGain?: number) {
   const base = pickFirstNumber(entry, [["base"]], 0);
-  const current = pickFirstNumber(entry, [["value"]], 0);
+  const current = progressionGain ?? pickFirstNumber(entry, [["value"]], 0);
   const bonus = pickFirstNumber(readRecord(entry.bonus), [["user"], ["value"]], 0);
   const malus = pickFirstNumber(readRecord(entry.malus), [["user"], ["value"]], 0);
   const overdrive = pickFirstNumber(readRecord(entry.overdrive), [["value"]], 0);
@@ -267,25 +367,53 @@ function readKnightScore(entry: Record<string, unknown>) {
   return base + current + bonus + overdrive - malus;
 }
 
+function parseKnightCharacteristics(source: Record<string, unknown>): CharacteristicEntry[] {
+  const aspects = pickFirstRecord(source, [["aspects"]]);
+  const progressionGains = parseKnightProgressionGains(source);
+
+  return Object.entries(aspects).flatMap(([aspectKey, aspectValue]) => {
+    const aspectRecord = readRecord(aspectValue);
+    const characteristics = readRecord(aspectRecord.caracteristiques);
+
+    return Object.entries(characteristics).map(([characteristicKey, characteristicValue]) => {
+      const characteristicRecord = readRecord(characteristicValue);
+      const progressionGain = progressionGains.has(characteristicKey)
+        ? progressionGains.get(characteristicKey)
+        : undefined;
+
+      return {
+        key: characteristicKey,
+        label: `${humanizeKey(characteristicKey)} (${humanizeKey(aspectKey)})`,
+        value: readKnightScore(characteristicRecord, progressionGain)
+      };
+    });
+  });
+}
+
 function parseKnightAspectGroups(source: Record<string, unknown>): AspectGroup[] {
   const aspects = pickFirstRecord(source, [["aspects"]]);
+  const progressionGains = parseKnightProgressionGains(source);
 
   return Object.entries(aspects).map(([aspectKey, aspectValue]) => {
     const aspectRecord = readRecord(aspectValue);
     const characteristics = readRecord(aspectRecord.caracteristiques);
     const normalizedAspectKey = aspectKey.toLowerCase();
+    const aspectProgressionGain = progressionGains.has(aspectKey) ? progressionGains.get(aspectKey) : undefined;
 
     return {
       key: aspectKey,
       label: knightAspectLabels[normalizedAspectKey] ?? humanizeKey(aspectKey),
-      value: readKnightScore(aspectRecord),
+      value: readKnightScore(aspectRecord, aspectProgressionGain),
       characteristics: Object.entries(characteristics).map(([characteristicKey, characteristicValue]) => {
         const characteristicRecord = readRecord(characteristicValue);
+        const characteristicProgressionGain = progressionGains.has(characteristicKey)
+          ? progressionGains.get(characteristicKey)
+          : undefined;
 
         return {
           key: `${aspectKey}-${characteristicKey}`,
           label: humanizeKey(characteristicKey),
-          value: readKnightScore(characteristicRecord)
+          value: readKnightScore(characteristicRecord, characteristicProgressionGain)
         };
       })
     };
@@ -294,19 +422,23 @@ function parseKnightAspectGroups(source: Record<string, unknown>): AspectGroup[]
 
 function parseKnightAttributes(source: Record<string, unknown>) {
   const aspects = pickFirstRecord(source, [["aspects"]]);
+  const progressionGains = parseKnightProgressionGains(source);
 
   return Object.entries(aspects).map(([key, value]) => {
     const entry = readRecord(value);
+    const progressionGain = progressionGains.has(key) ? progressionGains.get(key) : undefined;
+
     return {
       key,
       label: humanizeKey(key),
-      value: pickFirstNumber(entry, [["base"]], 0) + pickFirstNumber(entry, [["value"]], 0)
+      value: readKnightScore(entry, progressionGain)
     };
   });
 }
 
 function parseKnightSkills(source: Record<string, unknown>): SkillScore[] {
   const aspects = pickFirstRecord(source, [["aspects"]]);
+  const progressionGains = parseKnightProgressionGains(source);
 
   return Object.entries(aspects).flatMap(([aspectKey, aspectValue]) => {
     const aspectRecord = readRecord(aspectValue);
@@ -314,15 +446,14 @@ function parseKnightSkills(source: Record<string, unknown>): SkillScore[] {
 
     return Object.entries(characteristics).map(([characteristicKey, characteristicValue]) => {
       const entry = readRecord(characteristicValue);
-      const overdrive = pickFirstNumber(readRecord(entry.overdrive), [["value"]], 0);
-      const bonus = pickFirstNumber(readRecord(entry.bonus), [["user"]], 0);
-      const malus = pickFirstNumber(readRecord(entry.malus), [["user"]], 0);
-      const total = pickFirstNumber(entry, [["base"]], 0) + pickFirstNumber(entry, [["value"]], 0) + overdrive + bonus - malus;
+      const progressionGain = progressionGains.has(characteristicKey)
+        ? progressionGains.get(characteristicKey)
+        : undefined;
 
       return {
         key: characteristicKey,
         label: humanizeKey(characteristicKey),
-        value: total,
+        value: readKnightScore(entry, progressionGain),
         attribute: humanizeKey(aspectKey)
       };
     });
@@ -333,21 +464,42 @@ function parseKnightProgression(source: Record<string, unknown>): ProgressionBlo
   const progression = pickFirstRecord(source, [["progression", "experience", "depense", "liste"]]);
 
   return Object.entries(progression)
-    .map(([id, value]) => {
+    .flatMap(([id, value], sourceIndex) => {
       const entry = readRecord(value);
-      const displayBonusValue = Math.max(1, pickFirstNumber(entry, [["bonus"]], 1));
+      const key = pickFirstString(entry, [["nom"]], id);
+      const totalBonus = Math.max(0, pickFirstNumber(entry, [["bonus"]], 0));
+      const costXp = pickFirstNumber(entry, [["cout"]], 0);
+      const sourceOrder = pickFirstNumber(entry, [["addOrder"]], sourceIndex);
+      const category = knightAspectKeys.has(key.toLowerCase()) ? "aspect" : "competence";
 
-      return {
-        id: `progression-${id}`,
-        title: `+${displayBonusValue} ${humanizeKey(pickFirstString(entry, [["nom"]], id))}`,
-        category: "competence" as const,
+      return Array.from({ length: totalBonus }, (_, unitIndex) => ({
+        id: `progression-${id}-${unitIndex + 1}`,
+        title: `+1 ${humanizeKey(key)}`,
+        category,
         bonusValue: 1 as const,
-        costXp: pickFirstNumber(entry, [["cout"]], 0),
+        costXp: unitIndex === 0 ? costXp : 0,
         status: "spent" as const,
-        note: `Achat Foundry: ${pickFirstString(entry, [["nom"]], id)} (+${displayBonusValue})`
-      };
+        note:
+          totalBonus > 1
+            ? `Bloc ${unitIndex + 1}/${totalBonus} issu de ${humanizeKey(key)} +${totalBonus}.`
+            : `Bloc issu de ${humanizeKey(key)} +1.`,
+        sourceId: id,
+        sourceOrder,
+        unitIndex: unitIndex + 1,
+        unitTotal: totalBonus,
+        sourceCostXp: costXp
+      }));
     })
-    .filter((entry) => entry.costXp > 0);
+    .sort((first, second) => {
+      const firstOrder = first.sourceOrder ?? 0;
+      const secondOrder = second.sourceOrder ?? 0;
+
+      if (firstOrder !== secondOrder) {
+        return firstOrder - secondOrder;
+      }
+
+      return first.id.localeCompare(second.id);
+    });
 }
 
 function normalizeEquipmentItem(item: Record<string, unknown>, index: number): EquipmentItem {
@@ -485,12 +637,31 @@ export function validateFoundryKnightActor(input: unknown): FoundryActorValidati
 export function normalizeFoundryKnightActor(actor: FoundryKnightActor): KnightCharacterDraft {
   const system = readRecord(actor.system);
   const items = Array.isArray(actor.items) ? actor.items.map((item) => readRecord(item)) : [];
+  const aegis = normalizeStaticScore(readRecord(system.egide));
   const aspectGroups = parseKnightAspectGroups(system);
   const aspects = parseKnightAspects(system);
   const characteristics = parseKnightCharacteristics(system);
   const attributes = parseKnightAttributes(system);
   const skills = parseKnightSkills(system);
   const progression = parseKnightProgression(system);
+  const languages = uniqueStrings([
+    ...pickFirstStringArray(system, [["langues"], ["languages"]]),
+    ...parseItemNamesByType(items, ["langue"])
+  ]);
+  const distinctions = uniqueStrings([
+    ...pickFirstStringArray(system, [["distinctions"], ["distinction"]]),
+    ...parseItemNamesByType(items, ["distinction"])
+  ]);
+  const motivationItems = parseMotivationItems(items);
+  const primaryMotivation = stripHtml(
+    pickFirstString(system, [
+      ["motivations", "majeure"],
+      ["motivations", "principale"],
+      ["motivation", "majeure"],
+      ["motivationPrincipale"],
+      ["drive"]
+    ])
+  );
   const equipment = items
     .filter((item) => {
       const type = pickFirstString(item, [["type"]]).toLowerCase();
@@ -507,6 +678,7 @@ export function normalizeFoundryKnightActor(actor: FoundryKnightActor): KnightCh
     archetype: pickFirstString(system, [["archetype"], ["role"], ["class"]]),
     section: pickFirstString(system, [["section"], ["order"], ["organization"]]),
     blazon: pickFirstString(system, [["blason"], ["blazon"], ["armoiries"]]),
+    blazonDetail: motivationItems.blazonDetail,
     feat: pickFirstString(system, [["hautFait"], ["haut-fait"], ["haut_fait"], ["feat"]]),
     rank: pickFirstString(system, [["rank"], ["grade"]], "Écuyer"),
     order: pickFirstString(system, [["section"], ["order"], ["organization"]]),
@@ -516,15 +688,17 @@ export function normalizeFoundryKnightActor(actor: FoundryKnightActor): KnightCh
     ),
     description: stripHtml(pickFirstString(system, [["description"], ["identite", "description"]])),
     history: stripHtml(pickFirstString(system, [["histoire"], ["history"], ["background"]])),
-    motivations: stripHtml(pickFirstString(system, [["motivations"], ["motivation"], ["drive"]])),
-    languages: pickFirstStringArray(system, [["langues"], ["languages"]]),
-    distinctions: pickFirstStringArray(system, [["distinctions"], ["distinction"]]),
-    health: normalizeFlatGauge(readRecord(system.sante)),
-    hope: normalizeFlatGauge(readRecord(system.espoir)),
+    motivations: uniqueStrings([primaryMotivation, ...motivationItems.secondaryMotivations]).join(" · "),
+    primaryMotivation,
+    secondaryMotivations: motivationItems.secondaryMotivations,
+    languages,
+    distinctions,
+    health: normalizeHealthGauge(readRecord(system.sante)),
+    hope: normalizeHopeGauge(readRecord(system.espoir)),
     heroism: normalizeFlatGauge(readRecord(system.heroisme)),
-    aegis: pickFirstNumber(system, [["egide", "value"], ["égide", "value"], ["egide"], ["aegis", "value"], ["aegis"]], 0),
-    defense: pickFirstNumber(system, [["defense", "value"], ["défense", "value"], ["defense"], ["défense"]], 0),
-    reaction: pickFirstNumber(system, [["reaction", "value"], ["réaction", "value"], ["reaction"], ["réaction"]], 0),
+    aegis,
+    defense: normalizeStaticScore(readRecord(system.defense), aegis),
+    reaction: normalizeStaticScore(readRecord(system.reaction), aegis),
     energy: normalizeFlatGauge(readRecord(system.energie)),
     trauma: parseGauge(system, [["trauma"]], { current: 0, max: 0 }),
     aspectGroups,
