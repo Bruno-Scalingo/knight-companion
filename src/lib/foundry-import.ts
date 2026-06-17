@@ -470,7 +470,9 @@ function parseKnightProgression(source: Record<string, unknown>): ProgressionBlo
       const totalBonus = Math.max(0, pickFirstNumber(entry, [["bonus"]], 0));
       const costXp = pickFirstNumber(entry, [["cout"]], 0);
       const sourceOrder = pickFirstNumber(entry, [["addOrder"]], sourceIndex);
-      const category = knightAspectKeys.has(key.toLowerCase()) ? "aspect" : "competence";
+      const category: ProgressionBlock["category"] = knightAspectKeys.has(key.toLowerCase())
+        ? "aspect"
+        : "competence";
 
       return Array.from({ length: totalBonus }, (_, unitIndex) => ({
         id: `progression-${id}-${unitIndex + 1}`,
