@@ -326,7 +326,17 @@ function isInventoryEquipmentItem(item: EquipmentItem) {
   return item.slot === "weapon" || item.slot === "module";
 }
 
+function formatModuleType(moduleType: string | undefined) {
+  if (!moduleType) {
+    return "";
+  }
+
+  return `Module ${decodeHtmlEntities(moduleType).toLowerCase()}`;
+}
+
 function EquipmentCard({ item }: { item: EquipmentItem }) {
+  const moduleTypeLabel = item.slot === "module" ? formatModuleType(item.moduleType) : "";
+
   return (
     <Card>
       <CardHeader>
@@ -335,7 +345,8 @@ function EquipmentCard({ item }: { item: EquipmentItem }) {
           {item.name}
         </CardTitle>
         <CardDescription>
-          {equipmentSlotCopy[item.slot]}
+          {moduleTypeLabel || equipmentSlotCopy[item.slot]}
+          {item.slot === "module" && item.level ? ` · Niveau ${item.level}` : ""}
           {item.range ? ` · Portée ${item.range}` : ""}
           {item.quantity > 1 ? ` · Quantité ${item.quantity}` : ""}
         </CardDescription>
@@ -499,17 +510,28 @@ function CharacterSummary({ data }: { data: ResolvedCharacterData }) {
                 <Separator className="my-3" />
                 <div className="space-y-2">
                   {aspect.characteristics.length > 0 ? (
-                    aspect.characteristics.map((characteristic) => (
-                      <div key={characteristic.key} className="flex items-center justify-between gap-3 text-sm">
-                        <span className="flex min-w-0 flex-wrap items-center gap-1 text-muted-foreground">
-                          <span>{characteristic.label}</span>
-                          {typeof characteristic.overdrive === "number" && characteristic.overdrive > 0 ? (
-                            <span className="font-medium text-foreground">(+ {characteristic.overdrive} OD)</span>
-                          ) : null}
-                        </span>
-                        <span className="font-semibold">{characteristic.value}</span>
-                      </div>
-                    ))
+                    <div className="grid grid-cols-[1fr_2.5rem_2.5rem] gap-x-2 gap-y-2 text-sm">
+                      <span className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
+                        Carac.
+                      </span>
+                      <span className="text-right text-xs font-medium uppercase tracking-normal text-muted-foreground">
+                        Score
+                      </span>
+                      <span className="text-right text-xs font-medium uppercase tracking-normal text-muted-foreground">
+                        OD
+                      </span>
+                      {aspect.characteristics.map((characteristic) => (
+                        <div key={characteristic.key} className="contents">
+                          <span className="min-w-0 text-muted-foreground">{characteristic.label}</span>
+                          <span className="text-right font-semibold">{characteristic.value}</span>
+                          <span className="text-right font-semibold">
+                            {typeof characteristic.overdrive === "number" && characteristic.overdrive > 0
+                              ? characteristic.overdrive
+                              : "-"}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
                   ) : (
                     <p className="text-sm text-muted-foreground">Caractéristiques non importées.</p>
                   )}
@@ -780,7 +802,11 @@ export function CharacterEquipmentView({ characterId }: CharacterViewProps) {
   const rangedWeapons = weapons.filter((item) => item.weaponType === "distance" || !item.weaponType);
   const modules = visibleEquipment.filter((item) => {
     const sourceType = item.sourceType ? normalizeSourceType(item.sourceType) : "";
-    return sourceType === "module" || item.slot === "module";
+    return (sourceType === "module" || item.slot === "module") && !item.isOverdriveModule;
+  });
+  const overdriveModules = visibleEquipment.filter((item) => {
+    const sourceType = item.sourceType ? normalizeSourceType(item.sourceType) : "";
+    return (sourceType === "module" || item.slot === "module") && item.isOverdriveModule;
   });
 
   return (
@@ -793,6 +819,11 @@ export function CharacterEquipmentView({ characterId }: CharacterViewProps) {
 
       <WeaponColumns contactWeapons={contactWeapons} rangedWeapons={rangedWeapons} />
       <EquipmentSection title="MODULES" items={modules} emptyLabel="Aucun module exploitable détecté dans cet export." />
+      <EquipmentSection
+        title="OVERDRIVES"
+        items={overdriveModules}
+        emptyLabel="Aucun module d'overdrive détecté dans cet export."
+      />
     </div>
   );
 }
@@ -822,26 +853,14 @@ function applyStoredProgressionOrder(characterId: string, blocks: ProgressionBlo
     return blocks;
   }
 
-  const orderIndex = new Map(storedOrder.map((id, index) => [id, index]));
+  const blocksById = new Map(blocks.map((block) => [block.id, block]));
+  const orderedStoredBlocks = storedOrder
+    .map((id) => blocksById.get(id))
+    .filter((block): block is ProgressionBlock => Boolean(block));
+  const storedIds = new Set(storedOrder);
+  const newBlocks = blocks.filter((block) => !storedIds.has(block.id));
 
-  return [...blocks].sort((first, second) => {
-    const firstIndex = orderIndex.get(first.id);
-    const secondIndex = orderIndex.get(second.id);
-
-    if (firstIndex !== undefined && secondIndex !== undefined) {
-      return firstIndex - secondIndex;
-    }
-
-    if (firstIndex !== undefined) {
-      return -1;
-    }
-
-    if (secondIndex !== undefined) {
-      return 1;
-    }
-
-    return 0;
-  });
+  return [...orderedStoredBlocks, ...newBlocks];
 }
 
 function saveProgressionOrder(characterId: string, blocks: ProgressionBlock[]) {

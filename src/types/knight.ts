@@ -119,6 +119,9 @@ export type EquipmentItem = {
   sourceType?: string;
   weaponType?: "contact" | "distance";
   range?: string;
+  isOverdriveModule?: boolean;
+  moduleType?: string;
+  level?: number;
   quantity: number;
   equipped: boolean;
   tags: string[];

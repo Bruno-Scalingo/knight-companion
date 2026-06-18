@@ -371,16 +371,76 @@ function readKnightScore(entry: Record<string, unknown>, progressionGain?: numbe
   const current = progressionGain ?? pickFirstNumber(entry, [["value"]], 0);
   const bonus = pickFirstNumber(readRecord(entry.bonus), [["user"], ["value"]], 0);
   const malus = pickFirstNumber(readRecord(entry.malus), [["user"], ["value"]], 0);
-  const overdrive = readKnightOverdrive(entry);
 
-  return base + current + bonus + overdrive - malus;
+  return base + current + bonus - malus;
 }
 
 function readKnightOverdrive(entry: Record<string, unknown>) {
-  return Math.max(0, pickFirstNumber(readRecord(entry.overdrive), [["value"]], 0));
+  return Math.max(0, pickFirstNumber(entry, [["overdrive", "value"]], 0));
 }
 
-function parseKnightCharacteristics(source: Record<string, unknown>): CharacteristicEntry[] {
+function addOverdriveGain(gains: Map<string, number>, key: string, value: number) {
+  if (key.length === 0 || value <= 0) {
+    return;
+  }
+
+  gains.set(key, (gains.get(key) ?? 0) + value);
+}
+
+function addArmorOverdrives(gains: Map<string, number>, overdrives: Record<string, unknown>) {
+  for (const aspectValue of Object.values(overdrives)) {
+    const characteristicList = readRecord(readRecord(aspectValue).liste);
+
+    for (const [characteristicKey, characteristicValue] of Object.entries(characteristicList)) {
+      addOverdriveGain(gains, characteristicKey, pickFirstNumber(readRecord(characteristicValue), [["value"]], 0));
+    }
+  }
+}
+
+function addModuleLevelOverdrives(gains: Map<string, number>, moduleSystem: Record<string, unknown>) {
+  const level = pickFirstNumber(moduleSystem, [["niveau", "value"]], 0);
+  const levelDetails = readRecord(readRecord(readRecord(moduleSystem.niveau).details)[`n${level}`]);
+  const overdriveAspects = readRecord(readRecord(levelDetails.overdrives).aspects);
+
+  for (const aspectValue of Object.values(overdriveAspects)) {
+    for (const [characteristicKey, characteristicValue] of Object.entries(readRecord(aspectValue))) {
+      addOverdriveGain(gains, characteristicKey, readNumber(characteristicValue));
+    }
+  }
+}
+
+function parseKnightOverdriveGains(items: Record<string, unknown>[]) {
+  const gains = new Map<string, number>();
+
+  for (const item of items) {
+    const system = readRecord(item.system);
+    const type = pickFirstString(item, [["type"]]).toLowerCase();
+    const armorOverdrives = readRecord(system.overdrives);
+
+    if (Object.keys(armorOverdrives).length > 0) {
+      addArmorOverdrives(gains, armorOverdrives);
+    }
+
+    if (type === "module") {
+      addModuleLevelOverdrives(gains, system);
+    }
+  }
+
+  return gains;
+}
+
+function readCharacteristicOverdrive(
+  characteristicKey: string,
+  characteristicRecord: Record<string, unknown>,
+  overdriveGains: Map<string, number>
+) {
+  return readKnightOverdrive(characteristicRecord) + (overdriveGains.get(characteristicKey) ?? 0);
+}
+
+function parseKnightCharacteristics(
+  source: Record<string, unknown>,
+  overdriveGains = new Map<string, number>()
+): CharacteristicEntry[] {
   const aspects = pickFirstRecord(source, [["aspects"]]);
   const progressionGains = parseKnightProgressionGains(source);
 
@@ -398,13 +458,13 @@ function parseKnightCharacteristics(source: Record<string, unknown>): Characteri
         key: characteristicKey,
         label: `${humanizeKey(characteristicKey)} (${humanizeKey(aspectKey)})`,
         value: readKnightScore(characteristicRecord, progressionGain),
-        overdrive: readKnightOverdrive(characteristicRecord)
+        overdrive: readCharacteristicOverdrive(characteristicKey, characteristicRecord, overdriveGains)
       };
     });
   });
 }
 
-function parseKnightAspectGroups(source: Record<string, unknown>): AspectGroup[] {
+function parseKnightAspectGroups(source: Record<string, unknown>, overdriveGains = new Map<string, number>()): AspectGroup[] {
   const aspects = pickFirstRecord(source, [["aspects"]]);
   const progressionGains = parseKnightProgressionGains(source);
 
@@ -428,7 +488,7 @@ function parseKnightAspectGroups(source: Record<string, unknown>): AspectGroup[]
           key: `${aspectKey}-${characteristicKey}`,
           label: humanizeKey(characteristicKey),
           value: readKnightScore(characteristicRecord, characteristicProgressionGain),
-          overdrive: readKnightOverdrive(characteristicRecord)
+          overdrive: readCharacteristicOverdrive(characteristicKey, characteristicRecord, overdriveGains)
         };
       })
     };
@@ -563,13 +623,15 @@ function parseKnightProgression(source: Record<string, unknown>): ProgressionBlo
 function normalizeEquipmentItem(item: Record<string, unknown>, index: number): EquipmentItem {
   const system = readRecord(item.system);
   const descriptionRecord = readRecord(system.description);
+  const rawType = pickFirstString(item, [["type"]], "other").toLowerCase();
+  const currentLevel = pickFirstNumber(system, [["niveau", "value"]], 0);
+  const currentLevelDetails = readRecord(readRecord(readRecord(system.niveau).details)[`n${currentLevel}`]);
   const tags = Array.isArray(system.tags)
     ? system.tags.filter((tag): tag is string => typeof tag === "string")
     : Array.isArray(system.traits)
       ? system.traits.filter((tag): tag is string => typeof tag === "string")
       : [];
 
-  const rawType = pickFirstString(item, [["type"]], "other").toLowerCase();
   const slot: EquipmentItem["slot"] =
     rawType.includes("weapon") || rawType.includes("arme")
       ? "weapon"
@@ -595,6 +657,10 @@ function normalizeEquipmentItem(item: Record<string, unknown>, index: number): E
           ? "distance"
           : undefined,
     range: pickFirstString(system, [["portee"], ["portée"], ["range"]]),
+    isOverdriveModule:
+      rawType === "module" && readBoolean(readRecord(currentLevelDetails.overdrives).has, false),
+    moduleType: rawType === "module" ? pickFirstString(system, [["categorie"], ["category"]]) : undefined,
+    level: rawType === "module" ? currentLevel : undefined,
     quantity: pickFirstNumber(system, [["quantity"], ["qty"], ["count"]], 1),
     equipped: readBoolean(system.equipped, false) || readBoolean(readRecord(system.equipped).value, false),
     tags,
@@ -606,6 +672,32 @@ function normalizeEquipmentItem(item: Record<string, unknown>, index: number): E
       )
     )
   };
+}
+
+function isEmptyWeaponTemplateItem(item: Record<string, unknown>) {
+  const system = readRecord(item.system);
+  const type = pickFirstString(item, [["type"]]).toLowerCase();
+  const name = pickFirstString(item, [["name"]]).trim().toLowerCase();
+  const description = stripHtml(pickFirstString(system, [["description"]]));
+  const damageDice = pickFirstNumber(system, [["degats", "dice"]], 0);
+  const damageFixed = pickFirstNumber(system, [["degats", "fixe"]], 0);
+  const violenceDice = pickFirstNumber(system, [["violence", "dice"]], 0);
+  const violenceFixed = pickFirstNumber(system, [["violence", "fixe"]], 0);
+  const effects = readRecord(system.effets);
+  const rawEffects = Array.isArray(effects.raw) ? effects.raw : [];
+  const customEffects = Array.isArray(effects.custom) ? effects.custom : [];
+
+  return (
+    type === "arme" &&
+    name === "arme" &&
+    description.length === 0 &&
+    damageDice === 0 &&
+    damageFixed === 0 &&
+    violenceDice === 0 &&
+    violenceFixed === 0 &&
+    rawEffects.length === 0 &&
+    customEffects.length === 0
+  );
 }
 
 function parseMetaArmorFromItems(items: Record<string, unknown>[], system: Record<string, unknown>): MetaArmor | null {
@@ -704,9 +796,10 @@ export function normalizeFoundryKnightActor(actor: FoundryKnightActor): KnightCh
   const system = readRecord(actor.system);
   const items = Array.isArray(actor.items) ? actor.items.map((item) => readRecord(item)) : [];
   const aegis = normalizeStaticScore(readRecord(system.egide));
-  const aspectGroups = parseKnightAspectGroups(system);
+  const overdriveGains = parseKnightOverdriveGains(items);
+  const aspectGroups = parseKnightAspectGroups(system, overdriveGains);
   const aspects = parseKnightAspects(system);
-  const characteristics = parseKnightCharacteristics(system);
+  const characteristics = parseKnightCharacteristics(system, overdriveGains);
   const attributes = parseKnightAttributes(system);
   const skills = parseKnightSkills(system);
   const progression = parseKnightProgression(system);
@@ -740,6 +833,10 @@ export function normalizeFoundryKnightActor(actor: FoundryKnightActor): KnightCh
   );
   const equipment = items
     .filter((item) => {
+      if (isEmptyWeaponTemplateItem(item)) {
+        return false;
+      }
+
       const type = pickFirstString(item, [["type"]]).toLowerCase();
       return [
         "arme",
