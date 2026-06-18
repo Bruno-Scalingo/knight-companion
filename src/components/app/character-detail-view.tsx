@@ -856,7 +856,7 @@ export function CharacterMetaArmorView({ characterId }: CharacterViewProps) {
                     gauge={{ current: armor.shieldPoints.max, max: armor.shieldPoints.max }}
                     tone="secondary"
                   />
-                  <GaugeCard label="Énergie" gauge={character.energy} tone="accent" />
+                  <GaugeCard label="Énergie" gauge={data.character.energy} tone="accent" />
                 </CardContent>
               </Card>
             </div>
