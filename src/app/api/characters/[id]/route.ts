@@ -39,6 +39,11 @@ export async function GET(_request: Request, { params }: CharacterRouteContext) 
         orderBy: { createdAt: "desc" },
         take: 1
       },
+      metaArmorImage: {
+        select: {
+          id: true
+        }
+      },
       progressionOrder: {
         select: {
           blockIds: true
@@ -55,6 +60,8 @@ export async function GET(_request: Request, { params }: CharacterRouteContext) 
   const normalizedCharacter = latestImport.normalizedJson as KnightCharacterDraft;
   const progressionOrder = readProgressionOrderIds(character.progressionOrder?.blockIds);
 
+  const metaArmorImageUrl = character.metaArmorImage ? `/api/characters/${character.id}/meta-armor-image` : undefined;
+
   return NextResponse.json({
     id: character.id,
     importedAt: latestImport.createdAt.toISOString(),
@@ -63,6 +70,13 @@ export async function GET(_request: Request, { params }: CharacterRouteContext) 
     character: {
       ...normalizedCharacter,
       portraitUrl: character.portraitUrl ?? normalizedCharacter.portraitUrl,
+      metaArmor:
+        normalizedCharacter.metaArmor && metaArmorImageUrl
+          ? {
+              ...normalizedCharacter.metaArmor,
+              imageUrl: metaArmorImageUrl
+            }
+          : normalizedCharacter.metaArmor,
       progression: applyProgressionOrder(normalizedCharacter.progression, progressionOrder)
     }
   });

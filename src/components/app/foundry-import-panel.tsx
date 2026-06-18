@@ -45,11 +45,11 @@ function readFileAsDataUrl(file: File) {
         return;
       }
 
-      reject(new Error("Le portrait n'a pas pu être lu comme image."));
+      reject(new Error("L'image sélectionnée n'a pas pu être lue."));
     };
 
     reader.onerror = () => {
-      reject(reader.error ?? new Error("Erreur inconnue pendant la lecture du portrait."));
+      reject(reader.error ?? new Error("Erreur inconnue pendant la lecture de l'image."));
     };
 
     reader.readAsDataURL(file);
@@ -60,6 +60,7 @@ export function FoundryImportPanel() {
   const router = useRouter();
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [selectedPortraitFile, setSelectedPortraitFile] = useState<File | null>(null);
+  const [selectedMetaArmorImageFile, setSelectedMetaArmorImageFile] = useState<File | null>(null);
   const [pastedJson, setPastedJson] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -98,6 +99,30 @@ export function FoundryImportPanel() {
     setSuccessMessage(null);
   }
 
+  function handleMetaArmorImageFileChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0] ?? null;
+
+    console.log("[Foundry Import] Illustration de méta-armure sélectionnée", file?.name ?? "aucune illustration");
+
+    if (file && !file.type.startsWith("image/")) {
+      setSelectedMetaArmorImageFile(null);
+      setErrorMessage("L'illustration de la méta-armure doit être un fichier image.");
+      setSuccessMessage(null);
+      return;
+    }
+
+    if (file && file.size > 5 * 1024 * 1024) {
+      setSelectedMetaArmorImageFile(null);
+      setErrorMessage("L'illustration de la méta-armure ne doit pas dépasser 5 Mo.");
+      setSuccessMessage(null);
+      return;
+    }
+
+    setSelectedMetaArmorImageFile(file);
+    setErrorMessage(null);
+    setSuccessMessage(null);
+  }
+
   async function handleImport(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setErrorMessage(null);
@@ -107,6 +132,7 @@ export function FoundryImportPanel() {
     console.log("[Foundry Import] Démarrage de l'import", {
       fileName: selectedFile?.name,
       portraitFileName: selectedPortraitFile?.name,
+      metaArmorImageFileName: selectedMetaArmorImageFile?.name,
       hasPastedJson: pastedJson.trim().length > 0
     });
 
@@ -141,6 +167,7 @@ export function FoundryImportPanel() {
       const characterId = createImportedCharacterId(validation.actor._id, character.name, character.callsign);
       const characterRoute = `/personnages/${characterId}` as Route;
       const portraitDataUrl = selectedPortraitFile ? await readFileAsDataUrl(selectedPortraitFile) : null;
+      const metaArmorImageDataUrl = selectedMetaArmorImageFile ? await readFileAsDataUrl(selectedMetaArmorImageFile) : null;
 
       saveImportedCharacter({
         id: characterId,
@@ -166,6 +193,13 @@ export function FoundryImportPanel() {
                   fileName: selectedPortraitFile?.name,
                   mimeType: selectedPortraitFile?.type
                 }
+              : undefined,
+            metaArmorImage: metaArmorImageDataUrl
+              ? {
+                  dataUrl: metaArmorImageDataUrl,
+                  fileName: selectedMetaArmorImageFile?.name,
+                  mimeType: selectedMetaArmorImageFile?.type
+                }
               : undefined
           })
         });
@@ -176,8 +210,11 @@ export function FoundryImportPanel() {
           console.log("[Foundry Import] Import validé et stocké en base", persistedRecord);
         } else {
           const payload = (await response.json().catch(() => null)) as { error?: string } | null;
-          if (selectedPortraitFile) {
-            throw new Error(payload?.error ?? "Le portrait n'a pas pu être stocké en base.");
+          if (selectedPortraitFile || selectedMetaArmorImageFile) {
+            throw new Error(
+              payload?.error ??
+                "Les illustrations sélectionnées n'ont pas pu être stockées en base."
+            );
           }
           console.warn("[Foundry Import] Persistance serveur indisponible, fallback local", {
             status: response.status,
@@ -185,7 +222,7 @@ export function FoundryImportPanel() {
           });
         }
       } catch (error) {
-        if (selectedPortraitFile) {
+        if (selectedPortraitFile || selectedMetaArmorImageFile) {
           throw error;
         }
         console.warn("[Foundry Import] Persistance serveur indisponible, fallback local", error);
@@ -232,6 +269,22 @@ export function FoundryImportPanel() {
               <p className="flex items-center gap-2 text-sm text-muted-foreground">
                 <ImagePlus className="h-4 w-4 text-secondary" aria-hidden="true" />
                 Portrait sélectionné : <span className="font-medium text-foreground">{selectedPortraitFile.name}</span>
+              </p>
+            ) : null}
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="meta-armor-image-file">Illustration de la méta-armure</Label>
+            <Input
+              id="meta-armor-image-file"
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              onChange={handleMetaArmorImageFileChange}
+            />
+            {selectedMetaArmorImageFile ? (
+              <p className="flex items-center gap-2 text-sm text-muted-foreground">
+                <ImagePlus className="h-4 w-4 text-secondary" aria-hidden="true" />
+                Illustration sélectionnée :{" "}
+                <span className="font-medium text-foreground">{selectedMetaArmorImageFile.name}</span>
               </p>
             ) : null}
           </div>

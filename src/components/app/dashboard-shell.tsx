@@ -20,7 +20,7 @@ const tabDefinitions: Array<{
   { key: "personnage", suffix: "", label: "Personnage", icon: UserRound },
   { key: "meta-armure", suffix: "/meta-armure", label: "Méta-armure", icon: Shield },
   { key: "equipement", suffix: "/equipement", label: "Équipement", icon: Swords },
-  { key: "progression", suffix: "/progression", label: "Progression", icon: TrendingUp },
+  { key: "progression", suffix: "/progression", label: "Expérience", icon: TrendingUp },
   { key: "evolution", suffix: "/evolution", label: "Évolution", icon: WandSparkles }
 ];
 

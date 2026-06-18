@@ -56,7 +56,7 @@ type PortraitUpload = {
   mimeType?: string;
 };
 
-function parsePortraitUpload(upload: PortraitUpload | undefined) {
+function parseImageUpload(upload: PortraitUpload | undefined, label: string) {
   if (!upload?.dataUrl) {
     return null;
   }
@@ -64,7 +64,7 @@ function parsePortraitUpload(upload: PortraitUpload | undefined) {
   const match = upload.dataUrl.match(/^data:(image\/(?:png|jpe?g|webp));base64,([a-z0-9+/=]+)$/i);
 
   if (!match) {
-    throw new Error("Le portrait doit être une image PNG, JPG ou WebP valide.");
+    throw new Error(`${label} doit être une image PNG, JPG ou WebP valide.`);
   }
 
   const mimeType = match[1].toLowerCase() === "image/jpg" ? "image/jpeg" : match[1].toLowerCase();
@@ -72,11 +72,11 @@ function parsePortraitUpload(upload: PortraitUpload | undefined) {
   const maxSizeBytes = 5 * 1024 * 1024;
 
   if (data.length === 0) {
-    throw new Error("Le portrait sélectionné est vide.");
+    throw new Error(`${label} sélectionnée est vide.`);
   }
 
   if (data.length > maxSizeBytes) {
-    throw new Error("Le portrait ne doit pas dépasser 5 Mo.");
+    throw new Error(`${label} ne doit pas dépasser 5 Mo.`);
   }
 
   return {
@@ -94,6 +94,7 @@ export async function POST(request: Request) {
       characterId?: string;
       sourceFileName?: string;
       portrait?: PortraitUpload;
+      metaArmorImage?: PortraitUpload;
     };
     const validation = validateFoundryKnightActor(body.actor);
 
@@ -106,11 +107,20 @@ export async function POST(request: Request) {
       body.characterId && body.characterId.trim().length > 0
         ? body.characterId
         : createCharacterId(validation.actor._id, normalizedCharacter.name, normalizedCharacter.callsign);
-    const portraitUpload = parsePortraitUpload(body.portrait);
+    const portraitUpload = parseImageUpload(body.portrait, "Le portrait");
+    const metaArmorImageUpload = parseImageUpload(body.metaArmorImage, "L'illustration de la méta-armure");
     const portraitUrl = portraitUpload ? `/api/characters/${characterId}/portrait` : normalizedCharacter.portraitUrl;
+    const uploadedMetaArmorImageUrl =
+      normalizedCharacter.metaArmor && metaArmorImageUpload ? `/api/characters/${characterId}/meta-armor-image` : undefined;
     const normalizedCharacterWithPortrait = {
       ...normalizedCharacter,
-      portraitUrl
+      portraitUrl,
+      metaArmor: normalizedCharacter.metaArmor
+        ? {
+            ...normalizedCharacter.metaArmor,
+            imageUrl: uploadedMetaArmorImageUrl ?? normalizedCharacter.metaArmor.imageUrl
+          }
+        : normalizedCharacter.metaArmor
     };
     const campaign = await prisma.campaign.upsert({
       where: { slug: "default" },
@@ -124,6 +134,11 @@ export async function POST(request: Request) {
       where: { id: characterId },
       select: {
         portraitUrl: true,
+        metaArmorImage: {
+          select: {
+            id: true
+          }
+        },
         progressionOrder: {
           select: {
             blockIds: true
@@ -132,10 +147,20 @@ export async function POST(request: Request) {
       }
     });
     const preservedPortraitUrl = portraitUpload ? portraitUrl : existingCharacter?.portraitUrl ?? normalizedCharacter.portraitUrl;
+    const preservedMetaArmorImageUrl =
+      normalizedCharacter.metaArmor && (metaArmorImageUpload || existingCharacter?.metaArmorImage)
+        ? `/api/characters/${characterId}/meta-armor-image`
+        : normalizedCharacterWithPortrait.metaArmor?.imageUrl;
     const storedProgressionOrder = readProgressionOrderIds(existingCharacter?.progressionOrder?.blockIds);
     const persistedNormalizedCharacter: KnightCharacterDraft = {
       ...normalizedCharacterWithPortrait,
       portraitUrl: preservedPortraitUrl,
+      metaArmor: normalizedCharacterWithPortrait.metaArmor
+        ? {
+            ...normalizedCharacterWithPortrait.metaArmor,
+            imageUrl: preservedMetaArmorImageUrl
+          }
+        : normalizedCharacterWithPortrait.metaArmor,
       progression: applyProgressionOrder(normalizedCharacterWithPortrait.progression, storedProgressionOrder)
     };
     const rawActorJson = toPrismaJson(validation.actor);
@@ -224,6 +249,25 @@ export async function POST(request: Request) {
           mimeType: portraitUpload.mimeType,
           data: portraitUpload.data,
           sizeBytes: portraitUpload.sizeBytes
+        }
+      });
+    }
+
+    if (metaArmorImageUpload) {
+      await prisma.characterMetaArmorImage.upsert({
+        where: { characterId: character.id },
+        update: {
+          fileName: metaArmorImageUpload.fileName,
+          mimeType: metaArmorImageUpload.mimeType,
+          data: metaArmorImageUpload.data,
+          sizeBytes: metaArmorImageUpload.sizeBytes
+        },
+        create: {
+          characterId: character.id,
+          fileName: metaArmorImageUpload.fileName,
+          mimeType: metaArmorImageUpload.mimeType,
+          data: metaArmorImageUpload.data,
+          sizeBytes: metaArmorImageUpload.sizeBytes
         }
       });
     }

@@ -66,6 +66,7 @@ type ResolvedCharacterData = {
   equipment: EquipmentItem[];
   progression: ProgressionBlock[];
   evolution: EvolutionEntry[];
+  availableXp: number;
   importedRecord?: ImportedKnightCharacter;
 };
 
@@ -93,7 +94,8 @@ function buildMockCharacterData(): ResolvedCharacterData {
     metaArmor: mockMetaArmor,
     equipment: mockEquipment,
     progression: mockProgressionBlocks,
-    evolution: mockEvolutionEntries
+    evolution: mockEvolutionEntries,
+    availableXp: 0
   };
 }
 
@@ -175,6 +177,7 @@ function buildImportedCharacterData(record: ImportedKnightCharacter): ResolvedCh
     equipment: draft.equipment ?? [],
     progression: draft.progression ?? [],
     evolution: [],
+    availableXp: draft.availableXp ?? 0,
     importedRecord: record
   };
 }
@@ -795,7 +798,9 @@ export function CharacterMetaArmorView({ characterId }: CharacterViewProps) {
                 <div className="space-y-4">
                   <div className="flex items-start justify-between gap-4">
                     <CardTitle>{armor.name}</CardTitle>
-                    <p className="text-sm font-semibold text-muted-foreground">{armor.generation}</p>
+                    <p className="text-sm font-semibold text-muted-foreground">
+                      {/generation/i.test(armor.generation) ? armor.generation : `Génération ${armor.generation}`}
+                    </p>
                   </div>
                   <div className="overflow-hidden rounded-md border bg-muted/30">
                     {armor.imageUrl ? (
@@ -855,6 +860,7 @@ export function CharacterMetaArmorView({ characterId }: CharacterViewProps) {
                     label="Champ de Force"
                     gauge={{ current: armor.shieldPoints.max, max: armor.shieldPoints.max }}
                     tone="secondary"
+                    valueOnly
                   />
                   <GaugeCard label="Énergie" gauge={data.character.energy} tone="accent" />
                 </CardContent>
@@ -1067,11 +1073,13 @@ function moveProgressionBlock(blocks: ProgressionBlock[], fromIndex: number, toI
 function ProgressionTimeline({
   characterId,
   progression,
+  availableXp,
   access,
   useSharedOrder
 }: {
   characterId: string;
   progression: ProgressionBlock[];
+  availableXp: number;
   access: AccessContext;
   useSharedOrder: boolean;
 }) {
@@ -1080,7 +1088,6 @@ function ProgressionTimeline({
   const [orderMessage, setOrderMessage] = useState<string | null>(null);
   const canReorder = canEdit(access);
   const spentXp = orderedProgression.reduce((total, block) => total + block.costXp, 0);
-  const sourceEntries = new Set(orderedProgression.map((block) => block.sourceId ?? block.id)).size;
 
   useEffect(() => {
     let cancelled = false;
@@ -1195,19 +1202,19 @@ function ProgressionTimeline({
       <section className="grid gap-4 sm:grid-cols-3">
         <Card>
           <CardHeader>
-            <CardDescription>Blocs +1</CardDescription>
+            <CardDescription>Nombre de progressions</CardDescription>
             <CardTitle>{orderedProgression.length}</CardTitle>
           </CardHeader>
         </Card>
         <Card>
           <CardHeader>
-            <CardDescription>Entrées Foundry</CardDescription>
-            <CardTitle>{sourceEntries}</CardTitle>
+            <CardDescription>XP Disponible</CardDescription>
+            <CardTitle>{availableXp}</CardTitle>
           </CardHeader>
         </Card>
         <Card>
           <CardHeader>
-            <CardDescription>PX dépensés</CardDescription>
+            <CardDescription>XP Dépensés</CardDescription>
             <CardTitle>{spentXp}</CardTitle>
           </CardHeader>
         </Card>
@@ -1261,7 +1268,7 @@ export function CharacterProgressionView({ characterId }: CharacterViewProps) {
     <div className="space-y-6">
       <CharacterHeader
         title="Progression"
-        description="Blocs +1 ordonnés chronologiquement pour suivre l'évolution du chevalier."
+        description="Progression chronologique de l'expérience du chevalier."
         data={data}
         access={access}
       />
@@ -1269,6 +1276,7 @@ export function CharacterProgressionView({ characterId }: CharacterViewProps) {
       <ProgressionTimeline
         characterId={characterId}
         progression={data.progression}
+        availableXp={data.availableXp}
         access={access}
         useSharedOrder={data.source === "imported"}
       />

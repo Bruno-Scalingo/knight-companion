@@ -620,6 +620,18 @@ function parseKnightProgression(source: Record<string, unknown>): ProgressionBlo
     });
 }
 
+function parseKnightAvailableXp(source: Record<string, unknown>) {
+  const experience = pickFirstRecord(source, [["progression", "experience"]]);
+  const progression = pickFirstRecord(source, [["progression", "experience", "depense", "liste"]]);
+  const totalXp = pickFirstNumber(experience, [["total"]], 0);
+  const spentXp = Object.values(progression).reduce((sum, value) => {
+    const entry = readRecord(value);
+    return sum + Math.max(0, pickFirstNumber(entry, [["cout"]], 0));
+  }, 0);
+
+  return Math.max(0, totalXp - spentXp);
+}
+
 function normalizeEquipmentItem(item: Record<string, unknown>, index: number): EquipmentItem {
   const system = readRecord(item.system);
   const descriptionRecord = readRecord(system.description);
@@ -758,7 +770,7 @@ function isEmptyWeaponTemplateItem(item: Record<string, unknown>) {
   );
 }
 
-function sumModuleBonusByLevel(
+function readModuleBonusAtCurrentLevel(
   items: Record<string, unknown>[],
   bonusKey: "champDeForce" | "armure",
 ) {
@@ -772,14 +784,11 @@ function sumModuleBonusByLevel(
     const system = readRecord(item.system);
     const level = pickFirstNumber(system, [["niveau", "value"]], 0);
     const details = readRecord(readRecord(system.niveau).details);
+    const levelEntry = readRecord(details[`n${level}`]);
+    const bonus = readRecord(levelEntry.bonus);
 
-    for (let currentLevel = 1; currentLevel <= level; currentLevel += 1) {
-      const levelEntry = readRecord(details[`n${currentLevel}`]);
-      const bonus = readRecord(levelEntry.bonus);
-
-      if (readBoolean(readRecord(bonus[bonusKey]).has)) {
-        total += pickFirstNumber(readRecord(bonus[bonusKey]), [["value"]], 0);
-      }
+    if (readBoolean(readRecord(bonus[bonusKey]).has)) {
+      total += pickFirstNumber(readRecord(bonus[bonusKey]), [["value"]], 0);
     }
   }
 
@@ -809,8 +818,8 @@ function parseMetaArmorFromItems(items: Record<string, unknown>[], system: Recor
   };
   const armorName = pickFirstString(armorItem, [["name"]], "Méta-armure importée");
   const imageUrl = /paladin/i.test(armorName) ? "/meta-armors/paladin-r.png" : undefined;
-  const armorBonus = sumModuleBonusByLevel(items, "armure");
-  const shieldBonus = sumModuleBonusByLevel(items, "champDeForce");
+  const armorBonus = readModuleBonusAtCurrentLevel(items, "armure");
+  const shieldBonus = readModuleBonusAtCurrentLevel(items, "champDeForce");
 
   for (const item of items) {
     if (pickFirstString(item, [["type"]]).toLowerCase() !== "module") {
@@ -988,6 +997,7 @@ export function normalizeFoundryKnightActor(actor: FoundryKnightActor): KnightCh
   return {
     name: actor.name,
     callsign,
+    availableXp: parseKnightAvailableXp(system),
     portraitUrl: resolvePortraitUrl(actor, callsign),
     age: pickFirstString(system, [["age"], ["identite", "age"], ["identity", "age"]]),
     codename: callsign || pickFirstString(system, [["codename"], ["callsign"], ["alias"]]),

@@ -178,6 +178,7 @@ export type FoundryKnightActor = {
 export type KnightCharacterDraft = {
   name: string;
   callsign?: string;
+  availableXp?: number;
   portraitUrl?: string;
   age?: string;
   codename?: string;
