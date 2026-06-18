@@ -116,6 +116,9 @@ export type EquipmentItem = {
   id: string;
   name: string;
   slot: EquipmentSlot;
+  sourceType?: string;
+  weaponType?: "contact" | "distance";
+  range?: string;
   quantity: number;
   equipped: boolean;
   tags: string[];
@@ -201,9 +204,6 @@ export type ImportedKnightCharacter = {
   id: string;
   importedAt: string;
   sourceFileName?: string;
-  portraitFileName?: string;
-  portraitMimeType?: string;
-  portraitUpdatedAt?: string;
   actor: FoundryKnightActor;
   character: KnightCharacterDraft;
 };

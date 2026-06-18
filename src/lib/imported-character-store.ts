@@ -51,46 +51,6 @@ export function saveImportedCharacter(record: ImportedKnightCharacter) {
   window.sessionStorage.setItem(IMPORTED_CHARACTER_STORAGE_KEY, JSON.stringify(record));
 }
 
-export function updateImportedCharacterPortrait(
-  id: string,
-  portrait: {
-    url: string;
-    fileName: string;
-    mimeType: string;
-  }
-) {
-  const records = readImportedCharacterMap();
-  const record = records[id];
-
-  if (!record) {
-    console.error("[Portrait Import] Personnage importé introuvable pour la mise à jour du portrait", { id });
-    return null;
-  }
-
-  const updatedRecord: ImportedKnightCharacter = {
-    ...record,
-    actor: {
-      ...record.actor,
-      img: portrait.url
-    },
-    character: {
-      ...record.character,
-      portraitUrl: portrait.url
-    },
-    portraitFileName: portrait.fileName,
-    portraitMimeType: portrait.mimeType,
-    portraitUpdatedAt: new Date().toISOString()
-  };
-
-  records[id] = updatedRecord;
-
-  window.sessionStorage.setItem(IMPORTED_CHARACTERS_STORAGE_KEY, JSON.stringify(records));
-  window.sessionStorage.setItem(LATEST_IMPORTED_CHARACTER_ID_STORAGE_KEY, id);
-  window.sessionStorage.setItem(IMPORTED_CHARACTER_STORAGE_KEY, JSON.stringify(updatedRecord));
-
-  return updatedRecord;
-}
-
 export function readImportedCharacterById(id: string): ImportedKnightCharacter | null {
   const records = readImportedCharacterMap();
   const record = records[id] ?? null;

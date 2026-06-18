@@ -2,15 +2,13 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import type { ChangeEvent, ReactNode } from "react";
+import type { ReactNode } from "react";
 import {
   Activity,
   AlertCircle,
   ArrowLeft,
   CalendarDays,
   Cpu,
-  ImagePlus,
-  Loader2,
   PackageCheck
 } from "lucide-react";
 
@@ -21,17 +19,12 @@ import { ProgressionBlockCard } from "@/components/app/progression-block-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { adminAccess, canEdit, playerReadOnlyAccess } from "@/lib/access";
 import type { AccessContext } from "@/lib/access";
 import { normalizeFoundryKnightActor } from "@/lib/foundry-import";
 import { decodeHtmlEntities } from "@/lib/html-entities";
-import {
-  readImportedCharacterById,
-  updateImportedCharacterPortrait
-} from "@/lib/imported-character-store";
+import { readImportedCharacterById } from "@/lib/imported-character-store";
 import {
   mockCharacter,
   mockEquipment,
@@ -71,9 +64,6 @@ const systemStatusCopy = {
   limited: "Limité",
   offline: "Hors ligne"
 } as const;
-
-const allowedPortraitTypes = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
-const maxPortraitSize = 2 * 1024 * 1024;
 
 type ResolvedCharacterData = {
   source: "mock" | "imported";
@@ -305,130 +295,130 @@ function buildFallbackAspectGroups(character: KnightCharacter): AspectGroup[] {
   }));
 }
 
-function readFileAsDataUrl(file: File) {
-  return new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-
-    reader.addEventListener("load", () => {
-      if (typeof reader.result === "string") {
-        resolve(reader.result);
-        return;
-      }
-
-      reject(new Error("Le portrait n'a pas pu être lu."));
-    });
-    reader.addEventListener("error", () => reject(reader.error ?? new Error("Erreur de lecture du portrait.")));
-    reader.readAsDataURL(file);
-  });
+function uniqueNames(values: string[]) {
+  return Array.from(new Set(values.map((value) => decodeHtmlEntities(value.trim())).filter(Boolean)));
 }
 
-function CharacterSummary({ data, access }: { data: ResolvedCharacterData; access: AccessContext }) {
+function normalizeSourceType(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/s$/, "");
+}
+
+function pickEquipmentNamesBySourceType(equipment: EquipmentItem[], sourceTypes: string[]) {
+  const expectedTypes = new Set(sourceTypes.map(normalizeSourceType));
+
+  return uniqueNames(
+    equipment
+      .filter((item) => item.sourceType && expectedTypes.has(normalizeSourceType(item.sourceType)))
+      .map((item) => item.name)
+  );
+}
+
+function isInventoryEquipmentItem(item: EquipmentItem) {
+  if (item.sourceType) {
+    const sourceType = normalizeSourceType(item.sourceType);
+    return sourceType === "arme" || sourceType === "weapon" || sourceType === "module";
+  }
+
+  return item.slot === "weapon" || item.slot === "module";
+}
+
+function EquipmentCard({ item }: { item: EquipmentItem }) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <PackageCheck className="h-4 w-4" aria-hidden="true" />
+          {item.name}
+        </CardTitle>
+        <CardDescription>
+          {equipmentSlotCopy[item.slot]}
+          {item.range ? ` · Portée ${item.range}` : ""}
+          {item.quantity > 1 ? ` · Quantité ${item.quantity}` : ""}
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <p className="text-sm leading-6 text-muted-foreground">{item.description}</p>
+        {item.tags.length > 0 ? (
+          <div className="flex flex-wrap gap-2">
+            {item.tags.map((tag) => (
+              <Badge key={tag} variant="outline">
+                {tag}
+              </Badge>
+            ))}
+          </div>
+        ) : null}
+      </CardContent>
+    </Card>
+  );
+}
+
+function EquipmentSection({ title, items, emptyLabel }: { title: string; items: EquipmentItem[]; emptyLabel: string }) {
+  return (
+    <section className="space-y-3">
+      <h2 className="text-sm font-semibold uppercase tracking-normal text-muted-foreground">{title}</h2>
+      {items.length > 0 ? (
+        <div className="grid gap-4 md:grid-cols-2">
+          {items.map((item) => (
+            <EquipmentCard key={item.id} item={item} />
+          ))}
+        </div>
+      ) : (
+        <Card>
+          <CardContent className="p-4 text-sm text-muted-foreground">{emptyLabel}</CardContent>
+        </Card>
+      )}
+    </section>
+  );
+}
+
+function WeaponColumns({
+  contactWeapons,
+  rangedWeapons
+}: {
+  contactWeapons: EquipmentItem[];
+  rangedWeapons: EquipmentItem[];
+}) {
+  return (
+    <section className="space-y-3">
+      <h2 className="text-sm font-semibold uppercase tracking-normal text-muted-foreground">ARMES</h2>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <EquipmentSection
+          title="ARMES DE CONTACT"
+          items={contactWeapons}
+          emptyLabel="Aucune arme de contact détectée dans cet export."
+        />
+        <EquipmentSection
+          title="ARMES À DISTANCE"
+          items={rangedWeapons}
+          emptyLabel="Aucune arme à distance détectée dans cet export."
+        />
+      </div>
+    </section>
+  );
+}
+
+function CharacterSummary({ data }: { data: ResolvedCharacterData }) {
   const { character } = data;
   const aspectGroups = buildFallbackAspectGroups(character);
   const fallbackBiography = character.biography || "Aucune biographie importée pour ce personnage.";
-  const [portraitUrl, setPortraitUrl] = useState(character.portraitUrl ?? "");
-  const [portraitMessage, setPortraitMessage] = useState("");
-  const [portraitError, setPortraitError] = useState("");
-  const [isPortraitUploading, setIsPortraitUploading] = useState(false);
-  const canUploadPortrait = canEdit(access);
-
-  useEffect(() => {
-    setPortraitUrl(character.portraitUrl ?? "");
-    setPortraitMessage("");
-    setPortraitError("");
-  }, [character.id, character.portraitUrl]);
-
-  async function handlePortraitChange(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.currentTarget.files?.[0];
-
-    if (!file) {
-      return;
-    }
-
-    setPortraitMessage("");
-    setPortraitError("");
-
-    if (!allowedPortraitTypes.has(file.type)) {
-      const message = "Format non supporté. Utilise une image JPEG, PNG, WebP ou GIF.";
-      console.error("[Portrait Import] " + message, { type: file.type });
-      setPortraitError(message);
-      return;
-    }
-
-    if (file.size > maxPortraitSize) {
-      const message = "Image trop lourde. Limite actuelle: 2 Mo.";
-      console.error("[Portrait Import] " + message, { size: file.size });
-      setPortraitError(message);
-      return;
-    }
-
-    setIsPortraitUploading(true);
-
-    try {
-      console.log("[Portrait Import] Lecture du fichier portrait", { name: file.name, type: file.type, size: file.size });
-      const dataUrl = await readFileAsDataUrl(file);
-      let portraitSource = dataUrl;
-      let persistedInDatabase = false;
-
-      try {
-        const formData = new FormData();
-        formData.append("portrait", file);
-
-        const response = await fetch(`/api/characters/${character.id}/portrait`, {
-          method: "POST",
-          body: formData
-        });
-
-        if (response.ok) {
-          const payload = (await response.json()) as { portraitUrl?: string };
-          portraitSource = payload.portraitUrl ? `${payload.portraitUrl}?v=${Date.now()}` : dataUrl;
-          persistedInDatabase = true;
-          console.log("[Portrait Import] Portrait sauvegardé en base", { characterId: character.id });
-        } else {
-          const payload = (await response.json().catch(() => null)) as { error?: string } | null;
-          console.warn("[Portrait Import] Sauvegarde base indisponible, fallback session", {
-            status: response.status,
-            error: payload?.error
-          });
-        }
-      } catch (error) {
-        console.warn("[Portrait Import] Sauvegarde base indisponible, fallback session", error);
-      }
-
-      if (data.source === "imported" && data.importedRecord) {
-        updateImportedCharacterPortrait(data.importedRecord.id, {
-          url: portraitSource,
-          fileName: file.name,
-          mimeType: file.type
-        });
-      }
-
-      setPortraitUrl(portraitSource);
-      setPortraitMessage(
-        persistedInDatabase
-          ? "Portrait importé et sauvegardé en base."
-          : "Portrait importé pour cette session. La sauvegarde base sera utilisée dès que le personnage existera en PostgreSQL."
-      );
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Erreur inconnue pendant l'import du portrait.";
-      console.error("[Portrait Import] " + message, error);
-      setPortraitError(message);
-    } finally {
-      setIsPortraitUploading(false);
-      event.currentTarget.value = "";
-    }
-  }
+  const advantages = pickEquipmentNamesBySourceType(data.equipment, ["avantage"]);
+  const disadvantages = pickEquipmentNamesBySourceType(data.equipment, ["inconvenient", "désavantage"]);
+  const injuries = pickEquipmentNamesBySourceType(data.equipment, ["blessure"]);
 
   return (
     <>
       <section className="grid gap-4 lg:grid-cols-[18rem_1fr]">
         <Card>
-          <CardContent className="space-y-4 p-4">
+          <CardContent className="p-4">
             <div className="aspect-[3/4] overflow-hidden rounded-md border bg-muted">
-              {portraitUrl ? (
+              {character.portraitUrl ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
-                  src={portraitUrl}
+                  src={character.portraitUrl}
                   alt={`Portrait de ${character.name}`}
                   className="h-full w-full object-cover"
                 />
@@ -443,29 +433,6 @@ function CharacterSummary({ data, access }: { data: ResolvedCharacterData; acces
                 </div>
               )}
             </div>
-            {canUploadPortrait ? (
-              <div className="space-y-2">
-                <Label htmlFor={`portrait-${character.id}`} className="flex items-center gap-2">
-                  <ImagePlus className="h-4 w-4" aria-hidden={true} />
-                  Importer une photo
-                </Label>
-                <Input
-                  id={`portrait-${character.id}`}
-                  type="file"
-                  accept="image/png,image/jpeg,image/webp,image/gif"
-                  disabled={isPortraitUploading}
-                  onChange={handlePortraitChange}
-                />
-                {isPortraitUploading ? (
-                  <p className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden={true} />
-                    Import du portrait en cours.
-                  </p>
-                ) : null}
-                {portraitMessage ? <p className="text-xs text-muted-foreground">{portraitMessage}</p> : null}
-                {portraitError ? <p className="text-xs font-medium text-destructive">{portraitError}</p> : null}
-              </div>
-            ) : null}
           </CardContent>
         </Card>
 
@@ -555,18 +522,7 @@ function CharacterSummary({ data, access }: { data: ResolvedCharacterData; acces
         </CardContent>
       </Card>
 
-      <section className="grid gap-4 lg:grid-cols-[1fr_20rem]">
-        <Card>
-          <CardHeader>
-            <CardTitle>Biographie</CardTitle>
-            <CardDescription>Description et histoire du chevalier.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4 text-sm leading-6 text-muted-foreground">
-            <BiographyBlock title="Description" value={character.description || fallbackBiography} />
-            <BiographyBlock title="Histoire" value={character.history || fallbackBiography} />
-          </CardContent>
-        </Card>
-
+      <section className="grid gap-4 lg:grid-cols-[1fr_1fr]">
         <Card>
           <CardHeader>
             <CardTitle>Blason et motivations</CardTitle>
@@ -589,16 +545,30 @@ function CharacterSummary({ data, access }: { data: ResolvedCharacterData; acces
             />
           </CardContent>
         </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Repères</CardTitle>
+            <CardDescription>Langues, distinctions, avantages, désavantages et blessures.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-5">
+            <TagList title="Langues" values={character.languages} emptyLabel="Aucune langue importée." />
+            <TagList title="Distinctions" values={character.distinctions} emptyLabel="Aucune distinction importée." />
+            <TagList title="Avantages" values={advantages} emptyLabel="Aucun avantage importé." />
+            <TagList title="Désavantages" values={disadvantages} emptyLabel="Aucun désavantage importé." />
+            <TagList title="Blessures" values={injuries} emptyLabel="Aucune blessure importée." />
+          </CardContent>
+        </Card>
       </section>
 
       <Card>
         <CardHeader>
-          <CardTitle>Repères</CardTitle>
-          <CardDescription>Langues et distinctions.</CardDescription>
+          <CardTitle>Biographie</CardTitle>
+          <CardDescription>Description et histoire du chevalier.</CardDescription>
         </CardHeader>
-        <CardContent className="grid gap-5 md:grid-cols-2">
-          <TagList title="Langues" values={character.languages} emptyLabel="Aucune langue importée." />
-          <TagList title="Distinctions" values={character.distinctions} emptyLabel="Aucune distinction importée." />
+        <CardContent className="space-y-4 text-sm leading-6 text-muted-foreground">
+          <BiographyBlock title="Description" value={character.description || fallbackBiography} />
+          <BiographyBlock title="Histoire" value={character.history || fallbackBiography} />
         </CardContent>
       </Card>
     </>
@@ -680,7 +650,7 @@ export function CharacterDetailView({ characterId }: CharacterViewProps) {
         data={state.data}
         access={access}
       />
-      <CharacterSummary data={state.data} access={access} />
+      <CharacterSummary data={state.data} />
     </div>
   );
 }
@@ -801,55 +771,28 @@ export function CharacterEquipmentView({ characterId }: CharacterViewProps) {
   }
 
   const { data } = state;
+  const visibleEquipment = data.equipment.filter(isInventoryEquipmentItem);
+  const weapons = visibleEquipment.filter((item) => {
+    const sourceType = item.sourceType ? normalizeSourceType(item.sourceType) : "";
+    return sourceType === "arme" || sourceType === "weapon" || item.slot === "weapon";
+  });
+  const contactWeapons = weapons.filter((item) => item.weaponType === "contact");
+  const rangedWeapons = weapons.filter((item) => item.weaponType === "distance" || !item.weaponType);
+  const modules = visibleEquipment.filter((item) => {
+    const sourceType = item.sourceType ? normalizeSourceType(item.sourceType) : "";
+    return sourceType === "module" || item.slot === "module";
+  });
 
   return (
     <div className="space-y-6">
       <CharacterHeader
         title="Équipement"
-        description="Inventaire de séance avec les objets équipés, les consommables et les modules disponibles."
+        description="Armes et modules disponibles pour la séance."
         data={data}
       />
 
-      <section className="grid gap-4 md:grid-cols-2">
-        {data.equipment.length > 0 ? (
-          data.equipment.map((item) => (
-            <Card key={item.id}>
-              <CardHeader>
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <CardTitle className="flex items-center gap-2 text-base">
-                      <PackageCheck className="h-4 w-4" aria-hidden="true" />
-                      {item.name}
-                    </CardTitle>
-                    <CardDescription>
-                      {equipmentSlotCopy[item.slot]} · Quantité {item.quantity}
-                    </CardDescription>
-                  </div>
-                  <Badge variant={item.equipped ? "secondary" : "muted"}>{item.equipped ? "Équipé" : "Réserve"}</Badge>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <p className="text-sm leading-6 text-muted-foreground">{item.description}</p>
-                {item.tags.length > 0 ? (
-                  <div className="flex flex-wrap gap-2">
-                    {item.tags.map((tag) => (
-                      <Badge key={tag} variant="outline">
-                        {tag}
-                      </Badge>
-                    ))}
-                  </div>
-                ) : null}
-              </CardContent>
-            </Card>
-          ))
-        ) : (
-          <Card>
-            <CardContent className="p-4 text-sm text-muted-foreground">
-              Aucun équipement exploitable n'a été détecté dans cet export.
-            </CardContent>
-          </Card>
-        )}
-      </section>
+      <WeaponColumns contactWeapons={contactWeapons} rangedWeapons={rangedWeapons} />
+      <EquipmentSection title="MODULES" items={modules} emptyLabel="Aucun module exploitable détecté dans cet export." />
     </div>
   );
 }

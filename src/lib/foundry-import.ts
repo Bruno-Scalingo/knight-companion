@@ -53,7 +53,6 @@ function readString(value: unknown, fallback = "") {
 function isAppPortraitUrl(value: string) {
   return (
     value.startsWith("data:image/") ||
-    value.startsWith("/api/characters/") ||
     value.startsWith("/portraits/") ||
     value.startsWith("http://") ||
     value.startsWith("https://")
@@ -588,14 +587,22 @@ function normalizeEquipmentItem(item: Record<string, unknown>, index: number): E
     id: pickFirstString(item, [["_id"], ["id"]], `import-item-${index}`),
     name: pickFirstString(item, [["name"]], `Équipement ${index + 1}`),
     slot,
+    sourceType: rawType,
+    weaponType:
+      rawType === "arme" && pickFirstString(system, [["type"]]).toLowerCase() === "contact"
+        ? "contact"
+        : rawType === "arme" && pickFirstString(system, [["type"]]).toLowerCase() === "distance"
+          ? "distance"
+          : undefined,
+    range: pickFirstString(system, [["portee"], ["portée"], ["range"]]),
     quantity: pickFirstNumber(system, [["quantity"], ["qty"], ["count"]], 1),
     equipped: readBoolean(system.equipped, false) || readBoolean(readRecord(system.equipped).value, false),
     tags,
     description: stripHtml(
       pickFirstString(
-      { descriptionRecord, system },
-      [["descriptionRecord", "value"], ["descriptionRecord", "text"], ["system", "resume"], ["system", "summary"]],
-      "Aucune description fournie."
+        { descriptionRecord, system },
+        [["descriptionRecord", "value"], ["descriptionRecord", "text"], ["system", "resume"], ["system", "summary"]],
+        "Aucune description fournie."
       )
     )
   };
@@ -734,7 +741,16 @@ export function normalizeFoundryKnightActor(actor: FoundryKnightActor): KnightCh
   const equipment = items
     .filter((item) => {
       const type = pickFirstString(item, [["type"]]).toLowerCase();
-      return ["arme", "module", "avantage", "inconvenient", "blessure", "distinction"].includes(type);
+      return [
+        "arme",
+        "module",
+        "avantage",
+        "inconvenient",
+        "désavantage",
+        "desavantage",
+        "blessure",
+        "distinction"
+      ].includes(type);
     })
     .map(normalizeEquipmentItem);
 

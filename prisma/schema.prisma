@@ -95,10 +95,6 @@ model Character {
   callsign            String
   slug                String
   portraitUrl         String?
-  portraitMimeType    String?
-  portraitFileName    String?
-  portraitData        Bytes?
-  portraitUpdatedAt   DateTime?
   age                 String?
   archetype           String?
   section             String?
