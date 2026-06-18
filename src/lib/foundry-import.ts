@@ -797,6 +797,8 @@ function parseMetaArmorFromItems(items: Record<string, unknown>[], system: Recor
   const capacities = readRecord(metaArmor.capacites);
   const selectedCapacities = readRecord(capacities.selected);
   const slots = readRecord(metaArmor.slots);
+  const armorEvolutions = readRecord(metaArmor.evolutions);
+  const evolutionList = readRecord(armorEvolutions.liste);
   const moduleSlotUsage = {
     tete: 0,
     torse: 0,
@@ -861,7 +863,7 @@ function parseMetaArmorFromItems(items: Record<string, unknown>[], system: Recor
         description: stripHtml(pickFirstString(entryRecord, [["description"]], "Système importé."))
       };
     }),
-    evolutions: Object.entries(readRecord(metaArmor.evolutions.liste)).map(([key, value]) => {
+    evolutions: Object.entries(evolutionList).map(([key, value]) => {
       const evolution = readRecord(value);
 
       return {
