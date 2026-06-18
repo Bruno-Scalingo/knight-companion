@@ -4,6 +4,20 @@ export const IMPORTED_CHARACTER_STORAGE_KEY = "knight-companion:imported-charact
 export const IMPORTED_CHARACTERS_STORAGE_KEY = "knight-companion:imported-characters";
 export const LATEST_IMPORTED_CHARACTER_ID_STORAGE_KEY = "knight-companion:latest-imported-character-id";
 
+function readStorageValue(key: string) {
+  return window.localStorage.getItem(key) ?? window.sessionStorage.getItem(key);
+}
+
+function writeStorageValue(key: string, value: string) {
+  window.localStorage.setItem(key, value);
+  window.sessionStorage.setItem(key, value);
+}
+
+function removeStorageValue(key: string) {
+  window.localStorage.removeItem(key);
+  window.sessionStorage.removeItem(key);
+}
+
 function slugify(value: string) {
   return value
     .normalize("NFD")
@@ -15,17 +29,19 @@ function slugify(value: string) {
 }
 
 function readImportedCharacterMap(): Record<string, ImportedKnightCharacter> {
-  const rawRecords = window.sessionStorage.getItem(IMPORTED_CHARACTERS_STORAGE_KEY);
+  const rawRecords = readStorageValue(IMPORTED_CHARACTERS_STORAGE_KEY);
 
   if (!rawRecords) {
     return {};
   }
 
   try {
-    return JSON.parse(rawRecords) as Record<string, ImportedKnightCharacter>;
+    const records = JSON.parse(rawRecords) as Record<string, ImportedKnightCharacter>;
+    window.localStorage.setItem(IMPORTED_CHARACTERS_STORAGE_KEY, JSON.stringify(records));
+    return records;
   } catch (error) {
     console.error("[Foundry Import] Impossible de relire la liste des personnages importés", error);
-    window.sessionStorage.removeItem(IMPORTED_CHARACTERS_STORAGE_KEY);
+    removeStorageValue(IMPORTED_CHARACTERS_STORAGE_KEY);
     return {};
   }
 }
@@ -46,9 +62,9 @@ export function saveImportedCharacter(record: ImportedKnightCharacter) {
   const records = readImportedCharacterMap();
   records[record.id] = record;
 
-  window.sessionStorage.setItem(IMPORTED_CHARACTERS_STORAGE_KEY, JSON.stringify(records));
-  window.sessionStorage.setItem(LATEST_IMPORTED_CHARACTER_ID_STORAGE_KEY, record.id);
-  window.sessionStorage.setItem(IMPORTED_CHARACTER_STORAGE_KEY, JSON.stringify(record));
+  writeStorageValue(IMPORTED_CHARACTERS_STORAGE_KEY, JSON.stringify(records));
+  writeStorageValue(LATEST_IMPORTED_CHARACTER_ID_STORAGE_KEY, record.id);
+  writeStorageValue(IMPORTED_CHARACTER_STORAGE_KEY, JSON.stringify(record));
 }
 
 export function readImportedCharacterById(id: string): ImportedKnightCharacter | null {
@@ -63,13 +79,13 @@ export function readImportedCharacterById(id: string): ImportedKnightCharacter |
 }
 
 export function readImportedCharacter(): ImportedKnightCharacter | null {
-  const latestImportedCharacterId = window.sessionStorage.getItem(LATEST_IMPORTED_CHARACTER_ID_STORAGE_KEY);
+  const latestImportedCharacterId = readStorageValue(LATEST_IMPORTED_CHARACTER_ID_STORAGE_KEY);
 
   if (latestImportedCharacterId) {
     return readImportedCharacterById(latestImportedCharacterId);
   }
 
-  const rawRecord = window.sessionStorage.getItem(IMPORTED_CHARACTER_STORAGE_KEY);
+  const rawRecord = readStorageValue(IMPORTED_CHARACTER_STORAGE_KEY);
 
   if (!rawRecord) {
     return null;
@@ -80,14 +96,15 @@ export function readImportedCharacter(): ImportedKnightCharacter | null {
 
     if (!record.id) {
       console.error("[Foundry Import] Dernier import incompatible avec la route personnage actuelle", record);
-      window.sessionStorage.removeItem(IMPORTED_CHARACTER_STORAGE_KEY);
+      removeStorageValue(IMPORTED_CHARACTER_STORAGE_KEY);
       return null;
     }
 
+    window.localStorage.setItem(IMPORTED_CHARACTER_STORAGE_KEY, JSON.stringify(record));
     return record as ImportedKnightCharacter;
   } catch (error) {
     console.error("[Foundry Import] Impossible de relire le personnage importé", error);
-    window.sessionStorage.removeItem(IMPORTED_CHARACTER_STORAGE_KEY);
+    removeStorageValue(IMPORTED_CHARACTER_STORAGE_KEY);
     return null;
   }
 }

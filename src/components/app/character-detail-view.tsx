@@ -126,8 +126,8 @@ function decodeAspectGroups(groups: AspectGroup[] | undefined): AspectGroup[] {
 
 function buildImportedCharacterData(record: ImportedKnightCharacter): ResolvedCharacterData {
   const draft = {
-    ...record.character,
-    ...normalizeFoundryKnightActor(record.actor)
+    ...normalizeFoundryKnightActor(record.actor),
+    ...record.character
   };
 
   return {
@@ -178,10 +178,28 @@ function buildImportedCharacterData(record: ImportedKnightCharacter): ResolvedCh
   };
 }
 
+async function fetchPersistedImportedCharacter(characterId: string) {
+  try {
+    const response = await fetch(`/api/characters/${characterId}`);
+
+    if (!response.ok) {
+      console.warn("[Character Detail] Personnage absent de la base", { characterId, status: response.status });
+      return null;
+    }
+
+    return (await response.json()) as ImportedKnightCharacter;
+  } catch (error) {
+    console.warn("[Character Detail] Lecture serveur impossible", error);
+    return null;
+  }
+}
+
 function useResolvedCharacterData(characterId: string) {
   const [state, setState] = useState<CharacterState>({ status: "loading" });
 
   useEffect(() => {
+    let cancelled = false;
+
     console.log("[Character Detail] Chargement du personnage", { characterId });
 
     if (characterId === mockCharacter.id) {
@@ -192,20 +210,32 @@ function useResolvedCharacterData(characterId: string) {
       return;
     }
 
-    const importedCharacter = readImportedCharacterById(characterId);
+    async function resolveImportedCharacter() {
+      const importedCharacter = readImportedCharacterById(characterId) ?? (await fetchPersistedImportedCharacter(characterId));
 
-    if (!importedCharacter) {
-      const message = `Personnage introuvable pour l'identifiant "${characterId}".`;
-      console.error("[Character Detail] " + message);
-      setState({ status: "error", message });
-      return;
+      if (cancelled) {
+        return;
+      }
+
+      if (!importedCharacter) {
+        const message = `Personnage introuvable pour l'identifiant "${characterId}".`;
+        console.error("[Character Detail] " + message);
+        setState({ status: "error", message });
+        return;
+      }
+
+      console.log("[Character Detail] Personnage importé trouvé", importedCharacter);
+      setState({
+        status: "ready",
+        data: buildImportedCharacterData(importedCharacter)
+      });
     }
 
-    console.log("[Character Detail] Personnage importé trouvé", importedCharacter);
-    setState({
-      status: "ready",
-      data: buildImportedCharacterData(importedCharacter)
-    });
+    void resolveImportedCharacter();
+
+    return () => {
+      cancelled = true;
+    };
   }, [characterId]);
 
   return state;
@@ -846,18 +876,16 @@ function readStoredProgressionOrder(characterId: string) {
   }
 }
 
-function applyStoredProgressionOrder(characterId: string, blocks: ProgressionBlock[]) {
-  const storedOrder = readStoredProgressionOrder(characterId);
-
-  if (storedOrder.length === 0) {
+function applyProgressionOrder(blocks: ProgressionBlock[], orderedIds: string[]) {
+  if (orderedIds.length === 0) {
     return blocks;
   }
 
   const blocksById = new Map(blocks.map((block) => [block.id, block]));
-  const orderedStoredBlocks = storedOrder
+  const orderedStoredBlocks = orderedIds
     .map((id) => blocksById.get(id))
     .filter((block): block is ProgressionBlock => Boolean(block));
-  const storedIds = new Set(storedOrder);
+  const storedIds = new Set(orderedIds);
   const newBlocks = blocks.filter((block) => !storedIds.has(block.id));
 
   return [...orderedStoredBlocks, ...newBlocks];
@@ -868,6 +896,35 @@ function saveProgressionOrder(characterId: string, blocks: ProgressionBlock[]) {
     `${progressionOrderStoragePrefix}:${characterId}`,
     JSON.stringify(blocks.map((block) => block.id))
   );
+}
+
+async function fetchProgressionOrder(characterId: string) {
+  const response = await fetch(`/api/characters/${characterId}/progression-order`);
+
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+    throw new Error(payload?.error ?? "Lecture de l'ordre impossible.");
+  }
+
+  const payload = (await response.json()) as { blockIds?: unknown };
+  return Array.isArray(payload.blockIds) ? payload.blockIds.filter((id): id is string => typeof id === "string") : [];
+}
+
+async function saveProgressionOrderToServer(characterId: string, blocks: ProgressionBlock[]) {
+  const response = await fetch(`/api/characters/${characterId}/progression-order`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      blockIds: blocks.map((block) => block.id)
+    })
+  });
+
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+    throw new Error(payload?.error ?? "Sauvegarde de l'ordre impossible.");
+  }
 }
 
 function moveProgressionBlock(blocks: ProgressionBlock[], fromIndex: number, toIndex: number) {
@@ -885,20 +942,83 @@ function moveProgressionBlock(blocks: ProgressionBlock[], fromIndex: number, toI
 function ProgressionTimeline({
   characterId,
   progression,
-  access
+  access,
+  useSharedOrder
 }: {
   characterId: string;
   progression: ProgressionBlock[];
   access: AccessContext;
+  useSharedOrder: boolean;
 }) {
   const [orderedProgression, setOrderedProgression] = useState<ProgressionBlock[]>([]);
+  const [orderStatus, setOrderStatus] = useState<"idle" | "loading" | "saving" | "saved" | "error">("idle");
+  const [orderMessage, setOrderMessage] = useState<string | null>(null);
   const canReorder = canEdit(access);
   const spentXp = orderedProgression.reduce((total, block) => total + block.costXp, 0);
   const sourceEntries = new Set(orderedProgression.map((block) => block.sourceId ?? block.id)).size;
 
   useEffect(() => {
-    setOrderedProgression(applyStoredProgressionOrder(characterId, progression));
-  }, [characterId, progression]);
+    let cancelled = false;
+    const localOrder = readStoredProgressionOrder(characterId);
+    const locallyOrderedProgression = applyProgressionOrder(progression, localOrder);
+
+    setOrderedProgression(locallyOrderedProgression);
+    setOrderMessage(null);
+
+    if (!useSharedOrder) {
+      setOrderStatus("idle");
+      return;
+    }
+
+    setOrderStatus("loading");
+
+    async function loadSharedProgressionOrder() {
+      try {
+        const sharedOrder = await fetchProgressionOrder(characterId);
+
+        if (cancelled) {
+          return;
+        }
+
+        if (sharedOrder.length > 0) {
+          setOrderedProgression(applyProgressionOrder(progression, sharedOrder));
+          setOrderStatus("idle");
+          return;
+        }
+
+        if (canReorder && localOrder.length > 0) {
+          await saveProgressionOrderToServer(characterId, locallyOrderedProgression);
+          console.log("[Progression] Ordre local migré en base", { characterId, order: localOrder });
+
+          if (!cancelled) {
+            setOrderStatus("saved");
+            setOrderMessage("Ordre sauvegardé en base.");
+          }
+
+          return;
+        }
+
+        setOrderStatus("idle");
+      } catch (error) {
+        console.warn("[Progression] Lecture de l'ordre partagé impossible, fallback local", error);
+
+        if (!cancelled) {
+          setOrderStatus("error");
+          setOrderMessage(
+            error instanceof Error
+              ? error.message
+              : "L'ordre partagé n'a pas pu être chargé. L'ordre local reste affiché."
+          );
+        }
+      }
+    }
+
+    void loadSharedProgressionOrder();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [canReorder, characterId, progression, useSharedOrder]);
 
   function handleMove(fromIndex: number, toIndex: number) {
     setOrderedProgression((currentBlocks) => {
@@ -908,6 +1028,29 @@ function ProgressionTimeline({
         characterId,
         order: nextBlocks.map((block) => block.id)
       });
+
+      if (!useSharedOrder) {
+        return nextBlocks;
+      }
+
+      setOrderStatus("saving");
+      setOrderMessage("Sauvegarde de l'ordre en cours.");
+
+      void saveProgressionOrderToServer(characterId, nextBlocks)
+        .then(() => {
+          setOrderStatus("saved");
+          setOrderMessage("Ordre sauvegardé en base.");
+        })
+        .catch((error) => {
+          console.error("[Progression] Sauvegarde serveur impossible", error);
+          setOrderStatus("error");
+          setOrderMessage(
+            error instanceof Error
+              ? error.message
+              : "L'ordre n'a pas pu être sauvegardé en base. Les autres visiteurs ne verront pas ce changement."
+          );
+        });
+
       return nextBlocks;
     });
   }
@@ -944,6 +1087,18 @@ function ProgressionTimeline({
           </CardHeader>
         </Card>
       </section>
+
+      {orderMessage ? (
+        <div
+          className={`rounded-md border p-3 text-sm ${
+            orderStatus === "error"
+              ? "border-destructive/40 bg-destructive/10 text-destructive"
+              : "border-secondary/40 bg-secondary/10 text-secondary"
+          }`}
+        >
+          {orderMessage}
+        </div>
+      ) : null}
 
       <section className="space-y-3">
         {orderedProgression.map((block, index) => (
@@ -986,7 +1141,12 @@ export function CharacterProgressionView({ characterId }: CharacterViewProps) {
         access={access}
       />
 
-      <ProgressionTimeline characterId={characterId} progression={data.progression} access={access} />
+      <ProgressionTimeline
+        characterId={characterId}
+        progression={data.progression}
+        access={access}
+        useSharedOrder={data.source === "imported"}
+      />
     </div>
   );
 }
