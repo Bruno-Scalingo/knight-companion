@@ -88,6 +88,8 @@ export type KnightCharacter = {
 export type ArmorSlot = {
   key: string;
   label: string;
+  available?: number;
+  total?: number;
   occupiedBy?: string;
 };
 
@@ -98,16 +100,25 @@ export type ArmorSystem = {
   description: string;
 };
 
+export type ArmorEvolution = {
+  id: string;
+  threshold: number;
+  description: string;
+  applied: boolean;
+};
+
 export type MetaArmor = {
   id: string;
   name: string;
   frame: string;
   generation: string;
+  imageUrl?: string;
   armorPoints: Gauge;
   shieldPoints: Gauge;
   overdrive: Gauge;
   slots: ArmorSlot[];
   systems: ArmorSystem[];
+  evolutions: ArmorEvolution[];
 };
 
 export type EquipmentSlot = "weapon" | "armor" | "module" | "relic" | "consumable" | "other";
@@ -117,6 +128,8 @@ export type EquipmentItem = {
   name: string;
   slot: EquipmentSlot;
   sourceType?: string;
+  overdriveKey?: string;
+  slotUsage?: string[];
   weaponType?: "contact" | "distance";
   range?: string;
   isOverdriveModule?: boolean;

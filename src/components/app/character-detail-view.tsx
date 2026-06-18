@@ -59,12 +59,6 @@ const evolutionKindCopy = {
   narrative: "Narratif"
 } as const;
 
-const systemStatusCopy = {
-  online: "En ligne",
-  limited: "Limité",
-  offline: "Hors ligne"
-} as const;
-
 type ResolvedCharacterData = {
   source: "mock" | "imported";
   character: KnightCharacter;
@@ -124,6 +118,13 @@ function decodeAspectGroups(groups: AspectGroup[] | undefined): AspectGroup[] {
   }));
 }
 
+function normalizeHeroismGauge(gauge: KnightCharacter["heroism"]) {
+  return {
+    current: Math.min(gauge.current, 6),
+    max: 6
+  };
+}
+
 function buildImportedCharacterData(record: ImportedKnightCharacter): ResolvedCharacterData {
   const draft = {
     ...normalizeFoundryKnightActor(record.actor),
@@ -158,7 +159,7 @@ function buildImportedCharacterData(record: ImportedKnightCharacter): ResolvedCh
       distinctions: decodeTextList(draft.distinctions),
       health: draft.health ?? { current: 0, max: 0 },
       hope: draft.hope ?? { current: 0, max: 0 },
-      heroism: draft.heroism ?? { current: 0, max: 0 },
+      heroism: normalizeHeroismGauge(draft.heroism ?? { current: 0, max: 6 }),
       aegis: draft.aegis ?? 0,
       defense: draft.defense ?? 0,
       reaction: draft.reaction ?? 0,
@@ -364,6 +365,37 @@ function formatModuleType(moduleType: string | undefined) {
   return `Module ${decodeHtmlEntities(moduleType).toLowerCase()}`;
 }
 
+function mergeOverdriveEquipmentItems(items: EquipmentItem[]) {
+  const mergedItems = new Map<string, EquipmentItem>();
+
+  for (const item of items) {
+    const key = (item.overdriveKey ?? item.name).trim().toLowerCase();
+    const existingItem = mergedItems.get(key);
+
+    if (!existingItem) {
+      mergedItems.set(key, {
+        ...item,
+        tags: [...item.tags]
+      });
+      continue;
+    }
+
+    mergedItems.set(key, {
+      ...existingItem,
+      level: (existingItem.level ?? 0) + (item.level ?? 0),
+      quantity: Math.max(existingItem.quantity, item.quantity),
+      equipped: existingItem.equipped || item.equipped,
+      tags: uniqueNames([...existingItem.tags, ...item.tags]),
+      description:
+        existingItem.description === item.description
+          ? existingItem.description
+          : `${existingItem.description} ${item.description}`.trim()
+    });
+  }
+
+  return Array.from(mergedItems.values());
+}
+
 function EquipmentCard({ item }: { item: EquipmentItem }) {
   const moduleTypeLabel = item.slot === "module" ? formatModuleType(item.moduleType) : "";
 
@@ -383,6 +415,15 @@ function EquipmentCard({ item }: { item: EquipmentItem }) {
       </CardHeader>
       <CardContent className="space-y-4">
         <p className="text-sm leading-6 text-muted-foreground">{item.description}</p>
+        {item.slot === "module" && item.slotUsage && item.slotUsage.length > 0 ? (
+          <div className="flex flex-wrap gap-2">
+            {item.slotUsage.map((slotUsage) => (
+              <Badge key={slotUsage} variant="secondary">
+                {slotUsage}
+              </Badge>
+            ))}
+          </div>
+        ) : null}
         {item.tags.length > 0 ? (
           <div className="flex flex-wrap gap-2">
             {item.tags.map((tag) => (
@@ -485,13 +526,13 @@ function CharacterSummary({ data }: { data: ResolvedCharacterData }) {
             </div>
             <CardDescription>{character.archetype || "Archétype non renseigné"}</CardDescription>
           </CardHeader>
-          <CardContent className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          <CardContent className="grid gap-3 sm:grid-cols-3">
             <IdentityField label="Nom" value={character.name} />
             <IdentityField label="Surnom" value={character.callsign} />
             <IdentityField label="Âge" value={character.age} />
             <IdentityField label="Archétype" value={character.archetype} />
             <IdentityField label="Section" value={character.section || character.order} />
-            <IdentityField label="Haut-fait" value={character.feat} className="sm:col-span-2 xl:col-span-2" />
+            <IdentityField label="Haut-fait" value={character.feat} />
           </CardContent>
         </Card>
       </section>
@@ -512,7 +553,7 @@ function CharacterSummary({ data }: { data: ResolvedCharacterData }) {
         <Card>
           <CardHeader>
             <CardTitle>Défenses</CardTitle>
-            <CardDescription>Scores fixes lus depuis la fiche.</CardDescription>
+            <CardDescription>Scores de défense sans la Méta-Armure</CardDescription>
           </CardHeader>
           <CardContent className="grid grid-cols-3 gap-2 lg:grid-cols-1">
             <NumericStat label="Égide" value={character.aegis} />
@@ -654,6 +695,23 @@ function BiographyBlock({ title, value }: { title: string; value?: string }) {
   );
 }
 
+function HtmlContent({ value, className }: { value?: string; className?: string }) {
+  const html = decodeHtmlEntities(value ?? "").trim();
+
+  if (!html) {
+    return <p className={className}>Non renseigné.</p>;
+  }
+
+  return (
+    <div
+      className={className}
+      dangerouslySetInnerHTML={{
+        __html: html
+      }}
+    />
+  );
+}
+
 function TagList({ title, values, emptyLabel }: { title: string; values: string[]; emptyLabel: string }) {
   return (
     <div>
@@ -734,69 +792,134 @@ export function CharacterMetaArmorView({ characterId }: CharacterViewProps) {
           <section className="grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
             <Card>
               <CardHeader>
-                <CardTitle>{armor.name}</CardTitle>
-                <CardDescription>
-                  {armor.frame} · {armor.generation}
-                </CardDescription>
+                <div className="space-y-4">
+                  <div className="flex items-start justify-between gap-4">
+                    <CardTitle>{armor.name}</CardTitle>
+                    <p className="text-sm font-semibold text-muted-foreground">{armor.generation}</p>
+                  </div>
+                  <div className="overflow-hidden rounded-md border bg-muted/30">
+                    {armor.imageUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={armor.imageUrl}
+                        alt={`Illustration de la méta-armure ${armor.name}`}
+                        className="h-[28rem] w-full object-contain object-center"
+                      />
+                    ) : (
+                      <div className="flex h-[28rem] items-center justify-center px-6 text-center">
+                        <div>
+                          <p className="text-3xl font-bold text-muted-foreground">{armor.name}</p>
+                          <p className="mt-3 text-sm text-muted-foreground">Illustration de méta-armure non importée</p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
               </CardHeader>
-              <CardContent className="grid gap-4">
-                <GaugeCard label="Armure" gauge={armor.armorPoints} />
-                <GaugeCard label="Bouclier" gauge={armor.shieldPoints} tone="secondary" />
-                <GaugeCard label="Overdrive" gauge={armor.overdrive} tone="accent" />
-              </CardContent>
             </Card>
 
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Activity className="h-5 w-5" aria-hidden="true" />
-                  Emplacements
-                </CardTitle>
-                <CardDescription>Occupation actuelle des modules de la méta-armure.</CardDescription>
-              </CardHeader>
-              <CardContent className="grid gap-3 sm:grid-cols-2">
-                {armor.slots.length > 0 ? (
-                  armor.slots.map((slot) => (
-                    <div key={slot.key} className="rounded-md border p-4">
-                      <p className="text-sm text-muted-foreground">{slot.label}</p>
-                      <p className="mt-2 font-semibold">{slot.occupiedBy ?? "Libre"}</p>
-                    </div>
-                  ))
-                ) : (
-                  <EmptyStateCard message="Aucun emplacement de méta-armure n'a été trouvé dans cet export." />
-                )}
-              </CardContent>
-            </Card>
+            <div className="space-y-4 self-start">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Activity className="h-5 w-5" aria-hidden="true" />
+                    Emplacements
+                  </CardTitle>
+                  <CardDescription>Occupation actuelle des modules de la méta-armure.</CardDescription>
+                </CardHeader>
+                <CardContent className="grid gap-3 sm:grid-cols-2">
+                  {armor.slots.length > 0 ? (
+                    armor.slots.map((slot) => (
+                      <div key={slot.key} className="rounded-md border p-4">
+                        <p className="text-sm text-muted-foreground">{slot.label}</p>
+                        <p className="mt-2 font-semibold">
+                          {typeof slot.available === "number" && typeof slot.total === "number"
+                            ? `${slot.available} / ${slot.total}`
+                            : slot.occupiedBy ?? "Libre"}
+                        </p>
+                      </div>
+                    ))
+                  ) : (
+                    <EmptyStateCard message="Aucun emplacement de méta-armure n'a été trouvé dans cet export." />
+                  )}
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>Protection</CardTitle>
+                </CardHeader>
+                <CardContent className="grid gap-3 sm:grid-cols-2">
+                  <GaugeCard label="Armure" gauge={armor.armorPoints} />
+                  <GaugeCard
+                    label="Champ de Force"
+                    gauge={{ current: armor.shieldPoints.max, max: armor.shieldPoints.max }}
+                    tone="secondary"
+                  />
+                  <GaugeCard label="Énergie" gauge={character.energy} tone="accent" />
+                </CardContent>
+              </Card>
+            </div>
           </section>
 
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Cpu className="h-5 w-5" aria-hidden="true" />
-                Systèmes embarqués
+                Capacités
               </CardTitle>
-              <CardDescription>État de fonctionnement à afficher en séance.</CardDescription>
+              <CardDescription>Capacités spéciales de la Méta-armure</CardDescription>
             </CardHeader>
             <CardContent className="grid gap-3 md:grid-cols-3">
               {armor.systems.length > 0 ? (
                 armor.systems.map((system) => (
                   <div key={system.id} className="rounded-md border p-4">
-                    <div className="flex items-start justify-between gap-3">
-                      <h3 className="font-semibold">{system.name}</h3>
-                      <Badge
-                        variant={
-                          system.status === "online" ? "secondary" : system.status === "limited" ? "accent" : "muted"
-                        }
-                      >
-                        {systemStatusCopy[system.status]}
-                      </Badge>
-                    </div>
+                    <h3 className="font-semibold">{system.name}</h3>
                     <p className="mt-3 text-sm leading-6 text-muted-foreground">{system.description}</p>
                   </div>
                 ))
               ) : (
-                <EmptyStateCard message="Aucun système embarqué détaillé n'a été trouvé dans cet export." />
+                <EmptyStateCard message="Aucune capacité spéciale détaillée n'a été trouvée dans cet export." />
               )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Cpu className="h-5 w-5" aria-hidden="true" />
+                Évolution
+              </CardTitle>
+              <CardDescription>Paliers d'évolution de la Méta-armure</CardDescription>
+            </CardHeader>
+            <CardContent className="grid gap-3 md:grid-cols-3">
+              {armor.evolutions.length > 0 ? (
+                armor.evolutions.map((evolution) => (
+                  <div key={evolution.id} className="rounded-md border p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <h3 className="font-semibold">{evolution.threshold} PG</h3>
+                      <Badge variant={evolution.applied ? "secondary" : "outline"}>
+                        {evolution.applied ? "Activée" : "Non activée"}
+                      </Badge>
+                    </div>
+                    <p className="mt-3 text-sm leading-6 text-muted-foreground">{evolution.description}</p>
+                  </div>
+                ))
+              ) : (
+                <EmptyStateCard message="Aucun palier d'évolution n'a été trouvé dans cet export." />
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Description</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <HtmlContent
+                value={armor.frame}
+                className="text-sm leading-6 text-muted-foreground [&_p]:m-0 [&_p+*]:mt-3 [&_ul]:m-0 [&_ul]:pl-5 [&_ol]:m-0 [&_ol]:pl-5"
+              />
             </CardContent>
           </Card>
         </>
@@ -834,10 +957,12 @@ export function CharacterEquipmentView({ characterId }: CharacterViewProps) {
     const sourceType = item.sourceType ? normalizeSourceType(item.sourceType) : "";
     return (sourceType === "module" || item.slot === "module") && !item.isOverdriveModule;
   });
-  const overdriveModules = visibleEquipment.filter((item) => {
-    const sourceType = item.sourceType ? normalizeSourceType(item.sourceType) : "";
-    return (sourceType === "module" || item.slot === "module") && item.isOverdriveModule;
-  });
+  const overdriveModules = mergeOverdriveEquipmentItems(
+    visibleEquipment.filter((item) => {
+      const sourceType = item.sourceType ? normalizeSourceType(item.sourceType) : "";
+      return (sourceType === "module" || item.slot === "module") && item.isOverdriveModule;
+    })
+  );
 
   return (
     <div className="space-y-6">

@@ -623,6 +623,7 @@ function parseKnightProgression(source: Record<string, unknown>): ProgressionBlo
 function normalizeEquipmentItem(item: Record<string, unknown>, index: number): EquipmentItem {
   const system = readRecord(item.system);
   const descriptionRecord = readRecord(system.description);
+  const slotRecord = readRecord(system.slots);
   const rawType = pickFirstString(item, [["type"]], "other").toLowerCase();
   const currentLevel = pickFirstNumber(system, [["niveau", "value"]], 0);
   const currentLevelDetails = readRecord(readRecord(readRecord(system.niveau).details)[`n${currentLevel}`]);
@@ -644,12 +645,26 @@ function normalizeEquipmentItem(item: Record<string, unknown>, index: number): E
             : rawType.includes("consumable") || rawType.includes("consommable")
               ? "consumable"
               : "other";
+  const slotUsage =
+    rawType === "module"
+      ? Object.entries(slotRecord)
+          .map(([key, value]) => ({
+            key,
+            value: readNumber(value)
+          }))
+          .filter((entry) => entry.value > 0)
+          .map((entry) => `${humanizeKey(entry.key)} ${entry.value}`)
+      : [];
 
   return {
     id: pickFirstString(item, [["_id"], ["id"]], `import-item-${index}`),
     name: pickFirstString(item, [["name"]], `Équipement ${index + 1}`),
     slot,
     sourceType: rawType,
+    overdriveKey:
+      rawType === "module" && readBoolean(readRecord(currentLevelDetails.overdrives).has, false)
+        ? pickFirstString(item, [["name"]]).trim().toLowerCase()
+        : undefined,
     weaponType:
       rawType === "arme" && pickFirstString(system, [["type"]]).toLowerCase() === "contact"
         ? "contact"
@@ -660,6 +675,7 @@ function normalizeEquipmentItem(item: Record<string, unknown>, index: number): E
     isOverdriveModule:
       rawType === "module" && readBoolean(readRecord(currentLevelDetails.overdrives).has, false),
     moduleType: rawType === "module" ? pickFirstString(system, [["categorie"], ["category"]]) : undefined,
+    slotUsage,
     level: rawType === "module" ? currentLevel : undefined,
     quantity: pickFirstNumber(system, [["quantity"], ["qty"], ["count"]], 1),
     equipped: readBoolean(system.equipped, false) || readBoolean(readRecord(system.equipped).value, false),
@@ -672,6 +688,48 @@ function normalizeEquipmentItem(item: Record<string, unknown>, index: number): E
       )
     )
   };
+}
+
+function parseArmorOverdriveEquipmentItems(items: Record<string, unknown>[]): EquipmentItem[] {
+  const armorItem = items.find((item) => pickFirstString(item, [["type"]]).toLowerCase() === "armure");
+
+  if (!armorItem) {
+    return [];
+  }
+
+  const armorSystem = readRecord(armorItem.system);
+  const armorOverdrives = readRecord(armorSystem.overdrives);
+  const armorName = pickFirstString(armorItem, [["name"]], "Méta-armure importée");
+  const result: EquipmentItem[] = [];
+
+  for (const aspectValue of Object.values(armorOverdrives)) {
+    const characteristicList = readRecord(readRecord(aspectValue).liste);
+
+    for (const [characteristicKey, characteristicValue] of Object.entries(characteristicList)) {
+      const overdriveValue = pickFirstNumber(readRecord(characteristicValue), [["value"]], 0);
+
+      if (overdriveValue <= 0) {
+        continue;
+      }
+
+      result.push({
+        id: `armor-overdrive-${characteristicKey}`,
+        name: humanizeKey(characteristicKey),
+        slot: "module",
+        sourceType: "module",
+        overdriveKey: characteristicKey.toLowerCase(),
+        isOverdriveModule: true,
+        moduleType: "Overdrive",
+        level: overdriveValue,
+        quantity: 1,
+        equipped: true,
+        tags: ["Méta-armure", "Overdrive d'origine"],
+        description: `Overdrive natif de ${armorName}.`
+      });
+    }
+  }
+
+  return result;
 }
 
 function isEmptyWeaponTemplateItem(item: Record<string, unknown>) {
@@ -700,6 +758,34 @@ function isEmptyWeaponTemplateItem(item: Record<string, unknown>) {
   );
 }
 
+function sumModuleBonusByLevel(
+  items: Record<string, unknown>[],
+  bonusKey: "champDeForce" | "armure",
+) {
+  let total = 0;
+
+  for (const item of items) {
+    if (pickFirstString(item, [["type"]]).toLowerCase() !== "module") {
+      continue;
+    }
+
+    const system = readRecord(item.system);
+    const level = pickFirstNumber(system, [["niveau", "value"]], 0);
+    const details = readRecord(readRecord(system.niveau).details);
+
+    for (let currentLevel = 1; currentLevel <= level; currentLevel += 1) {
+      const levelEntry = readRecord(details[`n${currentLevel}`]);
+      const bonus = readRecord(levelEntry.bonus);
+
+      if (readBoolean(readRecord(bonus[bonusKey]).has)) {
+        total += pickFirstNumber(readRecord(bonus[bonusKey]), [["value"]], 0);
+      }
+    }
+  }
+
+  return total;
+}
+
 function parseMetaArmorFromItems(items: Record<string, unknown>[], system: Record<string, unknown>): MetaArmor | null {
   const armorItem = items.find((item) => pickFirstString(item, [["type"]]).toLowerCase() === "armure");
 
@@ -711,29 +797,61 @@ function parseMetaArmorFromItems(items: Record<string, unknown>[], system: Recor
   const capacities = readRecord(metaArmor.capacites);
   const selectedCapacities = readRecord(capacities.selected);
   const slots = readRecord(metaArmor.slots);
+  const moduleSlotUsage = {
+    tete: 0,
+    torse: 0,
+    brasGauche: 0,
+    brasDroit: 0,
+    jambeGauche: 0,
+    jambeDroite: 0
+  };
+  const armorName = pickFirstString(armorItem, [["name"]], "Méta-armure importée");
+  const imageUrl = /paladin/i.test(armorName) ? "/meta-armors/paladin-r.png" : undefined;
+  const armorBonus = sumModuleBonusByLevel(items, "armure");
+  const shieldBonus = sumModuleBonusByLevel(items, "champDeForce");
+
+  for (const item of items) {
+    if (pickFirstString(item, [["type"]]).toLowerCase() !== "module") {
+      continue;
+    }
+
+    const moduleSlots = readRecord(readRecord(item.system).slots);
+
+    for (const slotKey of Object.keys(moduleSlotUsage) as Array<keyof typeof moduleSlotUsage>) {
+      moduleSlotUsage[slotKey] += pickFirstNumber(moduleSlots, [[slotKey]], 0);
+    }
+  }
 
   return {
     id: pickFirstString(armorItem, [["_id"], ["id"]], "import-meta-armor"),
-    name: pickFirstString(armorItem, [["name"]], "Méta-armure importée"),
+    name: armorName,
     frame: pickFirstString(metaArmor, [["description"]], "Non renseigné"),
     generation: String(pickFirstNumber(metaArmor, [["generation"]], 0) || "Non renseignée"),
+    imageUrl,
     armorPoints: {
       current: pickFirstNumber(system, [["armure", "value"]], 0),
-      max: pickFirstNumber(metaArmor, [["armure", "base"]], 0)
+      max: pickFirstNumber(metaArmor, [["armure", "base"]], 0) + armorBonus
     },
     shieldPoints: {
       current: pickFirstNumber(system, [["champDeForce", "value"]], 0),
-      max: pickFirstNumber(metaArmor, [["champDeForce", "base"]], 0)
+      max: pickFirstNumber(metaArmor, [["champDeForce", "base"]], 0) + shieldBonus
     },
     overdrive: {
       current: pickFirstNumber(system, [["flux", "value"]], 0),
       max: 0
     },
-    slots: Object.entries(slots).map(([key, value]) => ({
-      key,
-      label: humanizeKey(key),
-      occupiedBy: `Slots ${pickFirstNumber(readRecord(value), [["value"]], 0)}`
-    })),
+    slots: Object.entries(slots).map(([key, value]) => {
+      const total = pickFirstNumber(readRecord(value), [["value"]], 0);
+      const usage = moduleSlotUsage[key as keyof typeof moduleSlotUsage] ?? 0;
+      const available = Math.max(0, total - usage);
+
+      return {
+        key,
+        label: humanizeKey(key),
+        available,
+        total
+      };
+    }),
     systems: Object.entries(selectedCapacities).map(([key, value], index) => {
       const entryRecord = readRecord(value);
       return {
@@ -741,6 +859,16 @@ function parseMetaArmorFromItems(items: Record<string, unknown>[], system: Recor
         name: pickFirstString(entryRecord, [["label"]], humanizeKey(key)),
         status: "online" as const,
         description: stripHtml(pickFirstString(entryRecord, [["description"]], "Système importé."))
+      };
+    }),
+    evolutions: Object.entries(readRecord(metaArmor.evolutions.liste)).map(([key, value]) => {
+      const evolution = readRecord(value);
+
+      return {
+        id: `import-evolution-${key}`,
+        threshold: pickFirstNumber(evolution, [["value"]], 0),
+        description: stripHtml(pickFirstString(evolution, [["description"]], "Évolution de méta-armure.")),
+        applied: readBoolean(evolution.applied)
       };
     })
   };
@@ -850,8 +978,10 @@ export function normalizeFoundryKnightActor(actor: FoundryKnightActor): KnightCh
       ].includes(type);
     })
     .map(normalizeEquipmentItem);
+  const armorOverdriveEquipment = parseArmorOverdriveEquipmentItems(items);
 
   const callsign = pickFirstString(system, [["surnom"], ["callsign"], ["codename"], ["alias"]]);
+  const importedHeroism = normalizeFlatGauge(readRecord(system.heroisme));
 
   return {
     name: actor.name,
@@ -879,7 +1009,10 @@ export function normalizeFoundryKnightActor(actor: FoundryKnightActor): KnightCh
     distinctions,
     health: normalizeHealthGauge(readRecord(system.sante)),
     hope: normalizeHopeGauge(readRecord(system.espoir)),
-    heroism: normalizeFlatGauge(readRecord(system.heroisme)),
+    heroism: {
+      current: Math.min(importedHeroism.current, 6),
+      max: 6
+    },
     aegis,
     defense,
     reaction,
@@ -889,7 +1022,7 @@ export function normalizeFoundryKnightActor(actor: FoundryKnightActor): KnightCh
     aspects,
     characteristics,
     metaArmor: parseMetaArmorFromItems(items, system),
-    equipment,
+    equipment: [...equipment, ...armorOverdriveEquipment],
     progression,
     rawFoundryActorId: actor._id,
     attributes,

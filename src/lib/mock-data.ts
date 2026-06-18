@@ -35,7 +35,7 @@ export const mockCharacter: KnightCharacter = {
   distinctions: ["Citation de Verre Noir", "Ruban de coordination d'escouade"],
   health: { current: 13, max: 16 },
   hope: { current: 5, max: 7 },
-  heroism: { current: 2, max: 3 },
+  heroism: { current: 2, max: 6 },
   aegis: 2,
   defense: 8,
   reaction: 5,
@@ -121,6 +121,7 @@ export const mockMetaArmor: MetaArmor = {
   name: "Paladin M-12",
   frame: "Méta-armure polyvalente",
   generation: "Génération 4",
+  imageUrl: "/meta-armors/paladin-r.png",
   armorPoints: { current: 18, max: 22 },
   shieldPoints: { current: 9, max: 12 },
   overdrive: { current: 2, max: 5 },
@@ -148,6 +149,26 @@ export const mockMetaArmor: MetaArmor = {
       name: "Canal escouade",
       status: "online",
       description: "Chiffrement actif avec relais local."
+    }
+  ],
+  evolutions: [
+    {
+      id: "armor-evolution-150",
+      threshold: 150,
+      description: "Première évolution débloquée pour la méta-armure.",
+      applied: true
+    },
+    {
+      id: "armor-evolution-200",
+      threshold: 200,
+      description: "Deuxième évolution débloquée pour la méta-armure.",
+      applied: false
+    },
+    {
+      id: "armor-evolution-250",
+      threshold: 250,
+      description: "Troisième évolution débloquée pour la méta-armure.",
+      applied: false
     }
   ]
 };
