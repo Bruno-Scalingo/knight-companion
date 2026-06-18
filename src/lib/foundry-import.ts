@@ -624,7 +624,7 @@ function parseKnightAvailableXp(source: Record<string, unknown>) {
   const experience = pickFirstRecord(source, [["progression", "experience"]]);
   const progression = pickFirstRecord(source, [["progression", "experience", "depense", "liste"]]);
   const totalXp = pickFirstNumber(experience, [["total"]], 0);
-  const spentXp = Object.values(progression).reduce((sum, value) => {
+  const spentXp = Object.values(progression).reduce<number>((sum, value) => {
     const entry = readRecord(value);
     return sum + Math.max(0, pickFirstNumber(entry, [["cout"]], 0));
   }, 0);
