@@ -50,6 +50,16 @@ function readString(value: unknown, fallback = "") {
   return typeof value === "string" && value.length > 0 ? decodeHtmlEntities(value) : fallback;
 }
 
+function isAppPortraitUrl(value: string) {
+  return (
+    value.startsWith("data:image/") ||
+    value.startsWith("/api/characters/") ||
+    value.startsWith("/portraits/") ||
+    value.startsWith("http://") ||
+    value.startsWith("https://")
+  );
+}
+
 function readNumber(value: unknown, fallback = 0) {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
@@ -362,9 +372,13 @@ function readKnightScore(entry: Record<string, unknown>, progressionGain?: numbe
   const current = progressionGain ?? pickFirstNumber(entry, [["value"]], 0);
   const bonus = pickFirstNumber(readRecord(entry.bonus), [["user"], ["value"]], 0);
   const malus = pickFirstNumber(readRecord(entry.malus), [["user"], ["value"]], 0);
-  const overdrive = pickFirstNumber(readRecord(entry.overdrive), [["value"]], 0);
+  const overdrive = readKnightOverdrive(entry);
 
   return base + current + bonus + overdrive - malus;
+}
+
+function readKnightOverdrive(entry: Record<string, unknown>) {
+  return Math.max(0, pickFirstNumber(readRecord(entry.overdrive), [["value"]], 0));
 }
 
 function parseKnightCharacteristics(source: Record<string, unknown>): CharacteristicEntry[] {
@@ -384,7 +398,8 @@ function parseKnightCharacteristics(source: Record<string, unknown>): Characteri
       return {
         key: characteristicKey,
         label: `${humanizeKey(characteristicKey)} (${humanizeKey(aspectKey)})`,
-        value: readKnightScore(characteristicRecord, progressionGain)
+        value: readKnightScore(characteristicRecord, progressionGain),
+        overdrive: readKnightOverdrive(characteristicRecord)
       };
     });
   });
@@ -413,7 +428,8 @@ function parseKnightAspectGroups(source: Record<string, unknown>): AspectGroup[]
         return {
           key: `${aspectKey}-${characteristicKey}`,
           label: humanizeKey(characteristicKey),
-          value: readKnightScore(characteristicRecord, characteristicProgressionGain)
+          value: readKnightScore(characteristicRecord, characteristicProgressionGain),
+          overdrive: readKnightOverdrive(characteristicRecord)
         };
       })
     };
@@ -458,6 +474,47 @@ function parseKnightSkills(source: Record<string, unknown>): SkillScore[] {
       };
     });
   });
+}
+
+function normalizeLookupKey(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+}
+
+function inferKnownPortraitUrl(actorName: string, callsign: string) {
+  const lookup = normalizeLookupKey(`${actorName} ${callsign}`);
+
+  if (lookup.includes("lars") && lookup.includes("aegis")) {
+    return "/portraits/lars-aegis-sverker.png";
+  }
+
+  return "";
+}
+
+function resolvePortraitUrl(actor: FoundryKnightActor, callsign: string) {
+  const importedPortraitUrl = readString(actor.img);
+
+  if (isAppPortraitUrl(importedPortraitUrl)) {
+    return importedPortraitUrl;
+  }
+
+  return inferKnownPortraitUrl(actor.name, callsign) || importedPortraitUrl;
+}
+
+function calculateHighestCharacteristicScore(
+  characteristics: CharacteristicEntry[],
+  keys: string[],
+  fallback = 0
+) {
+  const wantedKeys = new Set(keys.map(normalizeLookupKey));
+  const matchingScores = characteristics
+    .filter((characteristic) => wantedKeys.has(normalizeLookupKey(characteristic.key)))
+    .map((characteristic) => characteristic.value)
+    .filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+
+  return matchingScores.length > 0 ? Math.max(...matchingScores) : fallback;
 }
 
 function parseKnightProgression(source: Record<string, unknown>): ProgressionBlock[] {
@@ -646,6 +703,16 @@ export function normalizeFoundryKnightActor(actor: FoundryKnightActor): KnightCh
   const attributes = parseKnightAttributes(system);
   const skills = parseKnightSkills(system);
   const progression = parseKnightProgression(system);
+  const defense = calculateHighestCharacteristicScore(
+    characteristics,
+    ["hargne", "combat", "instinct"],
+    normalizeStaticScore(readRecord(system.defense), aegis)
+  );
+  const reaction = calculateHighestCharacteristicScore(
+    characteristics,
+    ["tir", "savoir", "technique"],
+    normalizeStaticScore(readRecord(system.reaction), aegis)
+  );
   const languages = uniqueStrings([
     ...pickFirstStringArray(system, [["langues"], ["languages"]]),
     ...parseItemNamesByType(items, ["langue"])
@@ -671,12 +738,14 @@ export function normalizeFoundryKnightActor(actor: FoundryKnightActor): KnightCh
     })
     .map(normalizeEquipmentItem);
 
+  const callsign = pickFirstString(system, [["surnom"], ["callsign"], ["codename"], ["alias"]]);
+
   return {
     name: actor.name,
-    callsign: pickFirstString(system, [["surnom"], ["callsign"], ["codename"], ["alias"]]),
-    portraitUrl: readString(actor.img),
+    callsign,
+    portraitUrl: resolvePortraitUrl(actor, callsign),
     age: pickFirstString(system, [["age"], ["identite", "age"], ["identity", "age"]]),
-    codename: pickFirstString(system, [["surnom"], ["codename"], ["callsign"], ["alias"]]),
+    codename: callsign || pickFirstString(system, [["codename"], ["callsign"], ["alias"]]),
     archetype: pickFirstString(system, [["archetype"], ["role"], ["class"]]),
     section: pickFirstString(system, [["section"], ["order"], ["organization"]]),
     blazon: pickFirstString(system, [["blason"], ["blazon"], ["armoiries"]]),
@@ -699,8 +768,8 @@ export function normalizeFoundryKnightActor(actor: FoundryKnightActor): KnightCh
     hope: normalizeHopeGauge(readRecord(system.espoir)),
     heroism: normalizeFlatGauge(readRecord(system.heroisme)),
     aegis,
-    defense: normalizeStaticScore(readRecord(system.defense), aegis),
-    reaction: normalizeStaticScore(readRecord(system.reaction), aegis),
+    defense,
+    reaction,
     energy: normalizeFlatGauge(readRecord(system.energie)),
     trauma: parseGauge(system, [["trauma"]], { current: 0, max: 0 }),
     aspectGroups,

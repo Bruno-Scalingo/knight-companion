@@ -29,6 +29,7 @@ export type CharacteristicEntry = {
   key: string;
   label: string;
   value: number | string;
+  overdrive?: number;
 };
 
 export type AspectGroup = {
@@ -200,6 +201,9 @@ export type ImportedKnightCharacter = {
   id: string;
   importedAt: string;
   sourceFileName?: string;
+  portraitFileName?: string;
+  portraitMimeType?: string;
+  portraitUpdatedAt?: string;
   actor: FoundryKnightActor;
   character: KnightCharacterDraft;
 };

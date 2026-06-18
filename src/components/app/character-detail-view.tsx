@@ -2,8 +2,17 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import type { ReactNode } from "react";
-import { Activity, AlertCircle, ArrowLeft, CalendarDays, Cpu, FileJson2, PackageCheck } from "lucide-react";
+import type { ChangeEvent, ReactNode } from "react";
+import {
+  Activity,
+  AlertCircle,
+  ArrowLeft,
+  CalendarDays,
+  Cpu,
+  ImagePlus,
+  Loader2,
+  PackageCheck
+} from "lucide-react";
 
 import { AccessBanner } from "@/components/app/access-banner";
 import { GaugeCard } from "@/components/app/gauge-card";
@@ -12,12 +21,17 @@ import { ProgressionBlockCard } from "@/components/app/progression-block-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { adminAccess, canEdit, playerReadOnlyAccess } from "@/lib/access";
 import type { AccessContext } from "@/lib/access";
 import { normalizeFoundryKnightActor } from "@/lib/foundry-import";
 import { decodeHtmlEntities } from "@/lib/html-entities";
-import { readImportedCharacterById } from "@/lib/imported-character-store";
+import {
+  readImportedCharacterById,
+  updateImportedCharacterPortrait
+} from "@/lib/imported-character-store";
 import {
   mockCharacter,
   mockEquipment,
@@ -57,6 +71,9 @@ const systemStatusCopy = {
   limited: "Limité",
   offline: "Hors ligne"
 } as const;
+
+const allowedPortraitTypes = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
+const maxPortraitSize = 2 * 1024 * 1024;
 
 type ResolvedCharacterData = {
   source: "mock" | "imported";
@@ -250,27 +267,6 @@ function CharacterHeader({
     <>
       <PageHeading title={title} description={description} action={action} />
       <AccessBanner access={access} />
-      {data.source === "imported" && data.importedRecord ? (
-        <Card>
-          <CardContent className="grid gap-3 p-4 text-sm sm:grid-cols-3">
-            <div className="rounded-md border p-3">
-              <p className="text-muted-foreground">Source</p>
-              <p className="mt-1 flex items-center gap-2 font-medium">
-                <FileJson2 className="h-4 w-4" aria-hidden="true" />
-                {data.importedRecord.sourceFileName ?? "Import collé"}
-              </p>
-            </div>
-            <div className="rounded-md border p-3">
-              <p className="text-muted-foreground">ID import</p>
-              <p className="mt-1 font-medium">{data.importedRecord.id}</p>
-            </div>
-            <div className="rounded-md border p-3">
-              <p className="text-muted-foreground">Acteur Foundry</p>
-              <p className="mt-1 font-medium">{data.importedRecord.character.rawFoundryActorId ?? "Non fourni"}</p>
-            </div>
-          </CardContent>
-        </Card>
-      ) : null}
     </>
   );
 }
@@ -309,21 +305,130 @@ function buildFallbackAspectGroups(character: KnightCharacter): AspectGroup[] {
   }));
 }
 
-function CharacterSummary({ data }: { data: ResolvedCharacterData }) {
+function readFileAsDataUrl(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+
+    reader.addEventListener("load", () => {
+      if (typeof reader.result === "string") {
+        resolve(reader.result);
+        return;
+      }
+
+      reject(new Error("Le portrait n'a pas pu être lu."));
+    });
+    reader.addEventListener("error", () => reject(reader.error ?? new Error("Erreur de lecture du portrait.")));
+    reader.readAsDataURL(file);
+  });
+}
+
+function CharacterSummary({ data, access }: { data: ResolvedCharacterData; access: AccessContext }) {
   const { character } = data;
   const aspectGroups = buildFallbackAspectGroups(character);
   const fallbackBiography = character.biography || "Aucune biographie importée pour ce personnage.";
+  const [portraitUrl, setPortraitUrl] = useState(character.portraitUrl ?? "");
+  const [portraitMessage, setPortraitMessage] = useState("");
+  const [portraitError, setPortraitError] = useState("");
+  const [isPortraitUploading, setIsPortraitUploading] = useState(false);
+  const canUploadPortrait = canEdit(access);
+
+  useEffect(() => {
+    setPortraitUrl(character.portraitUrl ?? "");
+    setPortraitMessage("");
+    setPortraitError("");
+  }, [character.id, character.portraitUrl]);
+
+  async function handlePortraitChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.currentTarget.files?.[0];
+
+    if (!file) {
+      return;
+    }
+
+    setPortraitMessage("");
+    setPortraitError("");
+
+    if (!allowedPortraitTypes.has(file.type)) {
+      const message = "Format non supporté. Utilise une image JPEG, PNG, WebP ou GIF.";
+      console.error("[Portrait Import] " + message, { type: file.type });
+      setPortraitError(message);
+      return;
+    }
+
+    if (file.size > maxPortraitSize) {
+      const message = "Image trop lourde. Limite actuelle: 2 Mo.";
+      console.error("[Portrait Import] " + message, { size: file.size });
+      setPortraitError(message);
+      return;
+    }
+
+    setIsPortraitUploading(true);
+
+    try {
+      console.log("[Portrait Import] Lecture du fichier portrait", { name: file.name, type: file.type, size: file.size });
+      const dataUrl = await readFileAsDataUrl(file);
+      let portraitSource = dataUrl;
+      let persistedInDatabase = false;
+
+      try {
+        const formData = new FormData();
+        formData.append("portrait", file);
+
+        const response = await fetch(`/api/characters/${character.id}/portrait`, {
+          method: "POST",
+          body: formData
+        });
+
+        if (response.ok) {
+          const payload = (await response.json()) as { portraitUrl?: string };
+          portraitSource = payload.portraitUrl ? `${payload.portraitUrl}?v=${Date.now()}` : dataUrl;
+          persistedInDatabase = true;
+          console.log("[Portrait Import] Portrait sauvegardé en base", { characterId: character.id });
+        } else {
+          const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+          console.warn("[Portrait Import] Sauvegarde base indisponible, fallback session", {
+            status: response.status,
+            error: payload?.error
+          });
+        }
+      } catch (error) {
+        console.warn("[Portrait Import] Sauvegarde base indisponible, fallback session", error);
+      }
+
+      if (data.source === "imported" && data.importedRecord) {
+        updateImportedCharacterPortrait(data.importedRecord.id, {
+          url: portraitSource,
+          fileName: file.name,
+          mimeType: file.type
+        });
+      }
+
+      setPortraitUrl(portraitSource);
+      setPortraitMessage(
+        persistedInDatabase
+          ? "Portrait importé et sauvegardé en base."
+          : "Portrait importé pour cette session. La sauvegarde base sera utilisée dès que le personnage existera en PostgreSQL."
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Erreur inconnue pendant l'import du portrait.";
+      console.error("[Portrait Import] " + message, error);
+      setPortraitError(message);
+    } finally {
+      setIsPortraitUploading(false);
+      event.currentTarget.value = "";
+    }
+  }
 
   return (
     <>
       <section className="grid gap-4 lg:grid-cols-[18rem_1fr]">
         <Card>
-          <CardContent className="p-4">
+          <CardContent className="space-y-4 p-4">
             <div className="aspect-[3/4] overflow-hidden rounded-md border bg-muted">
-              {character.portraitUrl ? (
+              {portraitUrl ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
-                  src={character.portraitUrl}
+                  src={portraitUrl}
                   alt={`Portrait de ${character.name}`}
                   className="h-full w-full object-cover"
                 />
@@ -338,6 +443,29 @@ function CharacterSummary({ data }: { data: ResolvedCharacterData }) {
                 </div>
               )}
             </div>
+            {canUploadPortrait ? (
+              <div className="space-y-2">
+                <Label htmlFor={`portrait-${character.id}`} className="flex items-center gap-2">
+                  <ImagePlus className="h-4 w-4" aria-hidden={true} />
+                  Importer une photo
+                </Label>
+                <Input
+                  id={`portrait-${character.id}`}
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp,image/gif"
+                  disabled={isPortraitUploading}
+                  onChange={handlePortraitChange}
+                />
+                {isPortraitUploading ? (
+                  <p className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden={true} />
+                    Import du portrait en cours.
+                  </p>
+                ) : null}
+                {portraitMessage ? <p className="text-xs text-muted-foreground">{portraitMessage}</p> : null}
+                {portraitError ? <p className="text-xs font-medium text-destructive">{portraitError}</p> : null}
+              </div>
+            ) : null}
           </CardContent>
         </Card>
 
@@ -406,7 +534,12 @@ function CharacterSummary({ data }: { data: ResolvedCharacterData }) {
                   {aspect.characteristics.length > 0 ? (
                     aspect.characteristics.map((characteristic) => (
                       <div key={characteristic.key} className="flex items-center justify-between gap-3 text-sm">
-                        <span className="text-muted-foreground">{characteristic.label}</span>
+                        <span className="flex min-w-0 flex-wrap items-center gap-1 text-muted-foreground">
+                          <span>{characteristic.label}</span>
+                          {typeof characteristic.overdrive === "number" && characteristic.overdrive > 0 ? (
+                            <span className="font-medium text-foreground">(+ {characteristic.overdrive} OD)</span>
+                          ) : null}
+                        </span>
                         <span className="font-semibold">{characteristic.value}</span>
                       </div>
                     ))
@@ -444,9 +577,10 @@ function CharacterSummary({ data }: { data: ResolvedCharacterData }) {
               title={`Blason${character.blazon ? ` : ${character.blazon}` : ""}`}
               value={character.blazonDetail}
             />
-            <BiographyBlock
+            <TagList
               title="Motivation principale"
-              value={character.primaryMotivation || character.motivations}
+              values={character.primaryMotivation ? [character.primaryMotivation] : []}
+              emptyLabel="Aucune motivation principale importée."
             />
             <TagList
               title="Motivations secondaires"
@@ -536,14 +670,17 @@ export function CharacterDetailView({ characterId }: CharacterViewProps) {
     return <CharacterErrorState message={state.message} />;
   }
 
+  const access = state.data.source === "imported" ? adminAccess : playerReadOnlyAccess;
+
   return (
     <div className="space-y-6">
       <CharacterHeader
         title="Personnage"
         description="Identité, ressources, aspects et scores principaux du chevalier."
         data={state.data}
+        access={access}
       />
-      <CharacterSummary data={state.data} />
+      <CharacterSummary data={state.data} access={access} />
     </div>
   );
 }

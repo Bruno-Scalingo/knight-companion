@@ -24,6 +24,8 @@ const namedEntities: Record<string, string> = {
   Iuml: "Ï",
   ocirc: "ô",
   Ocirc: "Ô",
+  ugrave: "ù",
+  Ugrave: "Ù",
   ougrave: "ù",
   Ougrave: "Ù",
   ucirc: "û",
@@ -46,7 +48,7 @@ const namedEntities: Record<string, string> = {
 };
 
 export function decodeHtmlEntities(value: string) {
-  return value.replace(/&(#x?[0-9a-fA-F]+|[a-zA-Z]+);/g, (entity, code: string) => {
+  return value.replace(/&(#x?[0-9a-fA-F]+|[a-zA-Z]+);?/g, (entity, code: string) => {
     if (code.startsWith("#x") || code.startsWith("#X")) {
       const parsed = Number.parseInt(code.slice(2), 16);
       return Number.isFinite(parsed) && parsed >= 0 && parsed <= 0x10ffff ? String.fromCodePoint(parsed) : entity;
