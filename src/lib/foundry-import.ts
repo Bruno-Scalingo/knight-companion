@@ -378,6 +378,10 @@ function readKnightScore(entry: Record<string, unknown>, progressionGain?: numbe
   return base + current + bonus - malus;
 }
 
+function readKnightBaseScore(entry: Record<string, unknown>) {
+  return pickFirstNumber(entry, [["base"]], 0);
+}
+
 function readKnightOverdrive(entry: Record<string, unknown>) {
   return Math.max(0, pickFirstNumber(entry, [["overdrive", "value"]], 0));
 }
@@ -461,6 +465,7 @@ function parseKnightCharacteristics(
         key: characteristicKey,
         label: `${humanizeKey(characteristicKey)} (${humanizeKey(aspectKey)})`,
         value: readKnightScore(characteristicRecord, progressionGain),
+        baseValue: readKnightBaseScore(characteristicRecord),
         overdrive: readCharacteristicOverdrive(characteristicKey, characteristicRecord, overdriveGains)
       };
     });
@@ -481,6 +486,7 @@ function parseKnightAspectGroups(source: Record<string, unknown>, overdriveGains
       key: aspectKey,
       label: knightAspectLabels[normalizedAspectKey] ?? humanizeKey(aspectKey),
       value: readKnightScore(aspectRecord, aspectProgressionGain),
+      baseValue: readKnightBaseScore(aspectRecord),
       characteristics: Object.entries(characteristics).map(([characteristicKey, characteristicValue]) => {
         const characteristicRecord = readRecord(characteristicValue);
         const characteristicProgressionGain = progressionGains.has(characteristicKey)
@@ -491,6 +497,7 @@ function parseKnightAspectGroups(source: Record<string, unknown>, overdriveGains
           key: `${aspectKey}-${characteristicKey}`,
           label: humanizeKey(characteristicKey),
           value: readKnightScore(characteristicRecord, characteristicProgressionGain),
+          baseValue: readKnightBaseScore(characteristicRecord),
           overdrive: readCharacteristicOverdrive(characteristicKey, characteristicRecord, overdriveGains)
         };
       })
@@ -642,25 +649,115 @@ function parseKnightAvailableXp(source: Record<string, unknown>) {
   return Math.max(0, totalXp - spentXp);
 }
 
-function parseKnightGloryProgression(source: Record<string, unknown>): ProgressionBlock[] {
+function readModuleCurrentLevel(system: Record<string, unknown>) {
+  return pickFirstNumber(system, [["niveau", "value"]], 0);
+}
+
+function readModuleLevelDetails(system: Record<string, unknown>, level: number) {
+  return readRecord(readRecord(readRecord(system.niveau).details)[`n${level}`]);
+}
+
+function readModuleCurrentLevelDetails(system: Record<string, unknown>) {
+  const currentLevel = readModuleCurrentLevel(system);
+
+  return readModuleLevelDetails(system, currentLevel);
+}
+
+function readItemGloryCost(item: Record<string, unknown>) {
+  const type = pickFirstString(item, [["type"]]).toLowerCase();
+  const system = readRecord(item.system);
+
+  if (type === "module") {
+    const currentLevel = Math.max(0, Math.trunc(readModuleCurrentLevel(system)));
+
+    return Array.from({ length: currentLevel }, (_, index) => index + 1).reduce((sum, level) => {
+      return sum + Math.max(0, pickFirstNumber(readModuleLevelDetails(system, level), [["prix"]], 0));
+    }, 0);
+  }
+
+  if (type === "arme") {
+    return Math.max(0, pickFirstNumber(system, [["prix"]], 0));
+  }
+
+  return 0;
+}
+
+function formatItemEvolutionTitle(item: Record<string, unknown>) {
+  const type = pickFirstString(item, [["type"]]).toLowerCase();
+  const system = readRecord(item.system);
+  const name = pickFirstString(item, [["name"]], "Évolution importée");
+
+  if (type === "armure") {
+    return `Méta-armure: ${name}`;
+  }
+
+  if (type === "module") {
+    const currentLevel = readModuleCurrentLevel(system);
+    return currentLevel > 0 ? `${name} niveau ${currentLevel}` : name;
+  }
+
+  return name;
+}
+
+function parseKnightGloryProgression(source: Record<string, unknown>, items: Record<string, unknown>[]): ProgressionBlock[] {
   const gloryList = pickFirstRecord(source, [["progression", "gloire", "depense", "liste"]]);
   const gloryOther = pickFirstRecord(source, [["progression", "gloire", "depense", "autre"]]);
   const entries = [
-    ...Object.entries(gloryList).map(([id, value]) => ({ id, value, source: "liste" as const })),
-    ...Object.entries(gloryOther).map(([id, value]) => ({ id, value, source: "autre" as const }))
+    ...items
+      .filter((item) => ["armure", "arme", "module"].includes(pickFirstString(item, [["type"]]).toLowerCase()))
+      .map((item, sourceIndex) => ({ item, sourceIndex, source: "item" as const })),
+    ...Object.entries(gloryList).map(([id, value], sourceIndex) => ({
+      id,
+      value,
+      sourceIndex: items.length + sourceIndex,
+      source: "liste" as const
+    })),
+    ...Object.entries(gloryOther).map(([id, value], sourceIndex) => ({
+      id,
+      value,
+      sourceIndex: items.length + Object.keys(gloryList).length + sourceIndex,
+      source: "autre" as const
+    }))
   ];
 
   return entries
-    .flatMap(({ id, value, source: entrySource }, sourceIndex) => {
-      const entry = readRecord(value);
-      const key = pickFirstString(entry, [["nom"]], id);
-      const totalBonus = Math.max(0, pickFirstNumber(entry, [["bonus"]], 0));
-      const costGp = Math.abs(pickFirstNumber(entry, [["cout"]], 0));
-      const sourceOrder = pickFirstNumber(entry, [["addOrder"], ["order"]], sourceIndex);
-      const blockCount = totalBonus > 0 ? totalBonus : costGp > 0 ? 1 : 0;
+    .flatMap((entry) => {
+      if (entry.source === "item") {
+        const itemId = pickFirstString(entry.item, [["_id"], ["id"]], `${entry.sourceIndex}`);
+        const itemType = pickFirstString(entry.item, [["type"]], "item");
+        const itemName = pickFirstString(entry.item, [["name"]], "Évolution importée");
+        const costGp = readItemGloryCost(entry.item);
+        const sourceOrder = entry.sourceIndex;
 
-      return Array.from({ length: blockCount }, (_, unitIndex) => ({
-        id: `evolution-${entrySource}-${id}-${unitIndex + 1}`,
+        return [
+          {
+            id: `evolution-item-${itemId}`,
+            title: formatItemEvolutionTitle(entry.item),
+            category: "armure" as const,
+            bonusValue: 1 as const,
+            costXp: costGp,
+            pointsLabel: "PG" as const,
+            status: "spent" as const,
+            note: `Progression Foundry liée à ${itemType} ${itemName}.`,
+            sourceId: `item-${itemId}`,
+            sourceOrder,
+            sourceCostXp: costGp > 0 ? costGp : undefined
+          }
+        ];
+      }
+
+      const gloryEntry = readRecord(entry.value);
+      const key = pickFirstString(gloryEntry, [["nom"]], entry.id);
+      const totalBonus = Math.max(0, pickFirstNumber(gloryEntry, [["bonus"]], 0));
+      const signedCostGp = pickFirstNumber(gloryEntry, [["cout"]], 0);
+      const rawCostGp = Math.abs(signedCostGp);
+      const costGp = entry.source === "autre" ? signedCostGp : rawCostGp;
+      const sourceOrder = pickFirstNumber(gloryEntry, [["addOrder"], ["order"]], entry.sourceIndex);
+      const blockCount = totalBonus > 0 ? totalBonus : costGp > 0 ? 1 : 0;
+      const fallbackBlockCount = entry.source === "autre" && rawCostGp > 0 ? 1 : blockCount;
+
+      return Array.from({ length: fallbackBlockCount }, (_, unitIndex) => ({
+        id: `evolution-${entry.source}-${entry.id}-${unitIndex + 1}`,
         title: totalBonus > 0 ? `+1 ${humanizeKey(key)}` : key,
         category: "armure" as const,
         bonusValue: 1 as const,
@@ -672,12 +769,14 @@ function parseKnightGloryProgression(source: Record<string, unknown>): Progressi
             ? `Bloc ${unitIndex + 1}/${totalBonus} issu de ${humanizeKey(key)} +${totalBonus}.`
             : totalBonus === 1
               ? `Bloc issu de ${humanizeKey(key)} +1.`
-              : `Dépense de gloire liée à ${key}.`,
-        sourceId: `${entrySource}-${id}`,
+              : entry.source === "autre"
+                ? `Ajustement de gloire lié à ${key}.`
+                : `Dépense de gloire liée à ${key}.`,
+        sourceId: `${entry.source}-${entry.id}`,
         sourceOrder,
         unitIndex: totalBonus > 1 ? unitIndex + 1 : undefined,
         unitTotal: totalBonus > 1 ? totalBonus : undefined,
-        sourceCostXp: costGp
+        sourceCostXp: signedCostGp !== 0 ? signedCostGp : undefined
       }));
     })
     .sort((first, second) => {
@@ -692,20 +791,21 @@ function parseKnightGloryProgression(source: Record<string, unknown>): Progressi
     });
 }
 
-function parseKnightAvailableGp(source: Record<string, unknown>) {
+function parseKnightAvailableGp(source: Record<string, unknown>, items: Record<string, unknown>[]) {
   const glory = pickFirstRecord(source, [["progression", "gloire"]]);
   const gloryList = pickFirstRecord(source, [["progression", "gloire", "depense", "liste"]]);
   const gloryOther = pickFirstRecord(source, [["progression", "gloire", "depense", "autre"]]);
   const totalGp = pickFirstNumber(glory, [["total"]], 0);
-  const spentGp =
-    Object.values(gloryList).reduce<number>((sum, value) => {
-      const entry = readRecord(value);
-      return sum + Math.abs(pickFirstNumber(entry, [["cout"]], 0));
-    }, 0) +
-    Object.values(gloryOther).reduce<number>((sum, value) => {
-      const entry = readRecord(value);
-      return sum + Math.abs(pickFirstNumber(entry, [["cout"]], 0));
-    }, 0);
+  const itemSpentGp = items.reduce<number>((sum, item) => sum + readItemGloryCost(item), 0);
+  const listSpentGp = Object.values(gloryList).reduce<number>((sum, value) => {
+    const entry = readRecord(value);
+    return sum + Math.abs(pickFirstNumber(entry, [["cout"]], 0));
+  }, 0);
+  const signedAdjustmentsGp = Object.values(gloryOther).reduce<number>((sum, value) => {
+    const entry = readRecord(value);
+    return sum + pickFirstNumber(entry, [["cout"]], 0);
+  }, 0);
+  const spentGp = itemSpentGp + listSpentGp + signedAdjustmentsGp;
 
   return Math.max(0, totalGp - spentGp);
 }
@@ -715,8 +815,8 @@ function normalizeEquipmentItem(item: Record<string, unknown>, index: number): E
   const descriptionRecord = readRecord(system.description);
   const slotRecord = readRecord(system.slots);
   const rawType = pickFirstString(item, [["type"]], "other").toLowerCase();
-  const currentLevel = pickFirstNumber(system, [["niveau", "value"]], 0);
-  const currentLevelDetails = readRecord(readRecord(readRecord(system.niveau).details)[`n${currentLevel}`]);
+  const currentLevel = readModuleCurrentLevel(system);
+  const currentLevelDetails = readModuleCurrentLevelDetails(system);
   const tags = Array.isArray(system.tags)
     ? system.tags.filter((tag): tag is string => typeof tag === "string")
     : Array.isArray(system.traits)
@@ -1076,7 +1176,7 @@ export function normalizeFoundryKnightActor(actor: FoundryKnightActor): KnightCh
     name: actor.name,
     callsign,
     availableXp: parseKnightAvailableXp(system),
-    availableGp: parseKnightAvailableGp(system),
+    availableGp: parseKnightAvailableGp(system, items),
     portraitUrl: resolvePortraitUrl(actor, callsign),
     age: pickFirstString(system, [["age"], ["identite", "age"], ["identity", "age"]]),
     codename: callsign || pickFirstString(system, [["codename"], ["callsign"], ["alias"]]),
@@ -1115,7 +1215,7 @@ export function normalizeFoundryKnightActor(actor: FoundryKnightActor): KnightCh
     metaArmor: parseMetaArmorFromItems(items, system),
     equipment: [...equipment, ...armorOverdriveEquipment],
     progression,
-    evolutionProgression: parseKnightGloryProgression(system),
+    evolutionProgression: parseKnightGloryProgression(system, items),
     rawFoundryActorId: actor._id,
     attributes,
     skills

@@ -97,7 +97,7 @@ export function ProgressionBlockCard({
             Bloc {block.unitIndex}/{block.unitTotal}
           </Badge>
         ) : null}
-        {block.sourceCostXp && block.sourceCostXp > 0 ? (
+        {typeof block.sourceCostXp === "number" && block.sourceCostXp !== 0 ? (
           <Badge variant="muted">
             {block.sourceCostXp} {block.pointsLabel ?? "XP"} source
           </Badge>

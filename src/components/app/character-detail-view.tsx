@@ -104,10 +104,13 @@ function decodeAspectGroups(groups: AspectGroup[] | undefined): AspectGroup[] {
     ...group,
     label: decodeHtmlEntities(group.label),
     value: typeof group.value === "string" ? decodeHtmlEntities(group.value) : group.value,
+    baseValue: typeof group.baseValue === "string" ? decodeHtmlEntities(group.baseValue) : group.baseValue,
     characteristics: group.characteristics.map((characteristic) => ({
       ...characteristic,
       label: decodeHtmlEntities(characteristic.label),
-      value: typeof characteristic.value === "string" ? decodeHtmlEntities(characteristic.value) : characteristic.value
+      value: typeof characteristic.value === "string" ? decodeHtmlEntities(characteristic.value) : characteristic.value,
+      baseValue:
+        typeof characteristic.baseValue === "string" ? decodeHtmlEntities(characteristic.baseValue) : characteristic.baseValue
     }))
   }));
 }
@@ -124,6 +127,13 @@ function buildImportedCharacterData(record: ImportedKnightCharacter): ResolvedCh
   const draft = {
     ...normalizedDraft,
     ...record.character,
+    aspectGroups: normalizedDraft.aspectGroups ?? record.character.aspectGroups,
+    characteristics: normalizedDraft.characteristics ?? record.character.characteristics,
+    equipment: normalizedDraft.equipment ?? record.character.equipment,
+    progression: normalizedDraft.progression ?? record.character.progression,
+    evolutionProgression: normalizedDraft.evolutionProgression ?? record.character.evolutionProgression,
+    availableXp: normalizedDraft.availableXp ?? record.character.availableXp,
+    availableGp: normalizedDraft.availableGp ?? record.character.availableGp,
     portraitUrl: record.character.portraitUrl ?? normalizedDraft.portraitUrl,
     metaArmor:
       normalizedDraft.metaArmor && record.character.metaArmor?.imageUrl
@@ -131,11 +141,7 @@ function buildImportedCharacterData(record: ImportedKnightCharacter): ResolvedCh
             ...normalizedDraft.metaArmor,
             imageUrl: record.character.metaArmor.imageUrl
           }
-        : normalizedDraft.metaArmor,
-    progression: record.character.progression ?? normalizedDraft.progression,
-    evolutionProgression: record.character.evolutionProgression ?? normalizedDraft.evolutionProgression,
-    availableXp: record.character.availableXp ?? normalizedDraft.availableXp,
-    availableGp: record.character.availableGp ?? normalizedDraft.availableGp
+        : normalizedDraft.metaArmor
   };
 
   return {
@@ -221,7 +227,7 @@ function useResolvedCharacterData(characterId: string) {
     }
 
     async function resolveImportedCharacter() {
-      const importedCharacter = readImportedCharacterById(characterId) ?? (await fetchPersistedImportedCharacter(characterId));
+      const importedCharacter = (await fetchPersistedImportedCharacter(characterId)) ?? readImportedCharacterById(characterId);
 
       if (cancelled) {
         return;
@@ -500,14 +506,128 @@ function normalizeCharacteristicKey(key: string) {
     .replace(/[^a-z0-9]+/g, "");
 }
 
-function calculateMetaArmorDefenseScore(aspectGroups: AspectGroup[], keys: string[], fallback: number) {
+function getCharacteristicLookupKeys(characteristic: { key: string; label: string }) {
+  const rawKey = characteristic.key.trim();
+  const rawKeyParts = rawKey.split(/[-_.:/\s]+/).filter(Boolean);
+  const lastRawKeyPart = rawKeyParts.at(-1) ?? rawKey;
+
+  return new Set(
+    [rawKey, lastRawKeyPart, characteristic.label]
+      .filter(Boolean)
+      .map((value) => normalizeCharacteristicKey(value))
+  );
+}
+
+function buildOverdriveLookup(equipment: EquipmentItem[]) {
+  const overdrives = new Map<string, number>();
+
+  for (const item of equipment) {
+    if (!item.isOverdriveModule) {
+      continue;
+    }
+
+    const level = typeof item.level === "number" ? item.level : 0;
+
+    if (level <= 0) {
+      continue;
+    }
+
+    for (const key of getCharacteristicLookupKeys({ key: item.overdriveKey ?? item.name, label: item.name })) {
+      overdrives.set(key, Math.max(overdrives.get(key) ?? 0, level));
+    }
+  }
+
+  return overdrives;
+}
+
+function readNumericScore(value: number | string) {
+  const score = typeof value === "number" ? value : Number(value);
+
+  return Number.isFinite(score) ? score : null;
+}
+
+function readBaseScore(value: number | string, baseValue: number | string | undefined, progressionCount: number) {
+  if (typeof baseValue !== "undefined") {
+    return baseValue;
+  }
+
+  const currentScore = readNumericScore(value);
+
+  return currentScore === null ? value : Math.max(0, currentScore - progressionCount);
+}
+
+function readProgressionTargetTitle(block: ProgressionBlock) {
+  return block.title.replace(/^\+1\s+/i, "").trim();
+}
+
+function buildProgressionCountLookup(blocks: ProgressionBlock[]) {
+  const progressionCounts = new Map<string, number>();
+
+  for (const block of blocks) {
+    if (block.bonusValue !== 1 || !["aspect", "competence", "attribut"].includes(block.category)) {
+      continue;
+    }
+
+    const targetTitle = readProgressionTargetTitle(block);
+
+    if (targetTitle.length === 0 || targetTitle === block.title) {
+      continue;
+    }
+
+    const key = normalizeCharacteristicKey(targetTitle);
+    progressionCounts.set(key, (progressionCounts.get(key) ?? 0) + 1);
+  }
+
+  return progressionCounts;
+}
+
+function readProgressionCount(entry: { key: string; label: string }, progressionCounts: Map<string, number>) {
+  const lookupKeys = getCharacteristicLookupKeys(entry);
+
+  return Math.max(...Array.from(lookupKeys).map((key) => progressionCounts.get(key) ?? 0));
+}
+
+function progressionToneClassName(count: number) {
+  if (count <= 0) {
+    return "text-muted-foreground";
+  }
+
+  if (count === 1) {
+    return "text-foreground";
+  }
+
+  if (count === 2) {
+    return "text-amber-500";
+  }
+
+  if (count === 3) {
+    return "text-orange-500";
+  }
+
+  return "text-red-500";
+}
+
+function calculateMetaArmorDefenseScore(
+  aspectGroups: AspectGroup[],
+  equipment: EquipmentItem[],
+  keys: string[],
+  fallback: number
+) {
   const wantedKeys = new Set(keys.map(normalizeCharacteristicKey));
+  const equipmentOverdrives = buildOverdriveLookup(equipment);
   const scores = aspectGroups
     .flatMap((aspect) => aspect.characteristics)
-    .filter((characteristic) => wantedKeys.has(normalizeCharacteristicKey(characteristic.key)))
+    .filter((characteristic) => {
+      const lookupKeys = getCharacteristicLookupKeys(characteristic);
+
+      return Array.from(lookupKeys).some((key) => wantedKeys.has(key));
+    })
     .map((characteristic) => {
       const score = typeof characteristic.value === "number" ? characteristic.value : Number(characteristic.value);
-      const overdrive = typeof characteristic.overdrive === "number" ? characteristic.overdrive : 0;
+      const lookupKeys = getCharacteristicLookupKeys(characteristic);
+      const equipmentOverdrive = Math.max(...Array.from(lookupKeys).map((key) => equipmentOverdrives.get(key) ?? 0));
+      const characteristicOverdrive = typeof characteristic.overdrive === "number" ? characteristic.overdrive : 0;
+      const overdrive = Math.max(characteristicOverdrive, equipmentOverdrive);
 
       return Number.isFinite(score) ? score + overdrive : null;
     })
@@ -516,16 +636,97 @@ function calculateMetaArmorDefenseScore(aspectGroups: AspectGroup[], keys: strin
   return scores.length > 0 ? Math.max(...scores) : fallback;
 }
 
+function ExperienceScoreTable({
+  aspectGroups,
+  progression
+}: {
+  aspectGroups: AspectGroup[];
+  progression: ProgressionBlock[];
+}) {
+  const progressionCounts = buildProgressionCountLookup(progression);
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Bases et progressions</CardTitle>
+        <CardDescription>Scores de base et nombre de progressions appliquées.</CardDescription>
+      </CardHeader>
+      <CardContent className="grid gap-3 lg:grid-cols-5">
+        {aspectGroups.length > 0 ? (
+          aspectGroups.map((aspect) => {
+            const aspectProgressionCount = readProgressionCount(aspect, progressionCounts);
+            const aspectBaseScore = readBaseScore(aspect.value, aspect.baseValue, aspectProgressionCount);
+
+            return (
+              <div key={aspect.key} className="rounded-md border p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm text-muted-foreground">{aspect.label}</p>
+                    <p className="mt-1 text-3xl font-bold">{aspectBaseScore}</p>
+                  </div>
+                  <span className={`text-sm font-semibold ${progressionToneClassName(aspectProgressionCount)}`}>
+                    +{aspectProgressionCount}
+                  </span>
+                </div>
+                <Separator className="my-3" />
+                <div className="space-y-2">
+                  {aspect.characteristics.length > 0 ? (
+                    <div className="grid grid-cols-[1fr_2.5rem_3rem] gap-x-2 gap-y-2 text-sm">
+                      <span className="text-xs font-medium uppercase tracking-normal text-muted-foreground">
+                        Carac.
+                      </span>
+                      <span className="text-right text-xs font-medium uppercase tracking-normal text-muted-foreground">
+                        Base
+                      </span>
+                      <span className="text-right text-xs font-medium uppercase tracking-normal text-muted-foreground">
+                        Prog.
+                      </span>
+                      {aspect.characteristics.map((characteristic) => {
+                        const progressionCount = readProgressionCount(characteristic, progressionCounts);
+                        const baseScore = readBaseScore(
+                          characteristic.value,
+                          characteristic.baseValue,
+                          progressionCount
+                        );
+
+                        return (
+                          <div key={characteristic.key} className="contents">
+                            <span className="min-w-0 text-muted-foreground">{characteristic.label}</span>
+                            <span className="text-right font-semibold">{baseScore}</span>
+                            <span className={`text-right font-semibold ${progressionToneClassName(progressionCount)}`}>
+                              +{progressionCount}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">Caractéristiques non importées.</p>
+                  )}
+                </div>
+              </div>
+            );
+          })
+        ) : (
+          <p className="text-sm text-muted-foreground">Aucun aspect importé.</p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 function CharacterSummary({ data }: { data: ResolvedCharacterData }) {
   const { character } = data;
   const aspectGroups = buildFallbackAspectGroups(character);
   const metaArmorDefense = calculateMetaArmorDefenseScore(
     aspectGroups,
+    data.equipment,
     ["hargne", "combat", "instinct"],
     character.defense
   );
   const metaArmorReaction = calculateMetaArmorDefenseScore(
     aspectGroups,
+    data.equipment,
     ["tir", "savoir", "technique"],
     character.reaction
   );
@@ -1337,6 +1538,11 @@ export function CharacterProgressionView({ characterId }: CharacterViewProps) {
         access={access}
       />
 
+      <ExperienceScoreTable
+        aspectGroups={buildFallbackAspectGroups(data.character)}
+        progression={data.progression}
+      />
+
       <OrderedBlocksTimeline
         characterId={characterId}
         blocks={data.progression}
@@ -1346,7 +1552,7 @@ export function CharacterProgressionView({ characterId }: CharacterViewProps) {
         storageKeyPrefix="knight-companion:progression-order"
         orderApiPath={`/api/characters/${characterId}/progression-order`}
         countLabel="Nombre de progressions"
-        availableLabel="XP Disponible"
+        availableLabel="XP Disponibles"
         spentLabel="XP Dépensés"
         emptyMessage="Aucune progression structurée n'a encore été importée pour ce personnage."
         logPrefix="Progression"
@@ -1387,7 +1593,7 @@ export function CharacterEvolutionView({ characterId }: CharacterViewProps) {
         storageKeyPrefix="knight-companion:evolution-order"
         orderApiPath={`/api/characters/${characterId}/evolution-order`}
         countLabel="Nombre d'évolutions"
-        availableLabel="PG Disponible"
+        availableLabel="PG Disponibles"
         spentLabel="PG Dépensés"
         emptyMessage="Aucune évolution de méta-armure n'a encore été importée pour ce personnage."
         logPrefix="Evolution"

@@ -29,6 +29,7 @@ export type CharacteristicEntry = {
   key: string;
   label: string;
   value: number | string;
+  baseValue?: number | string;
   overdrive?: number;
 };
 
@@ -36,6 +37,7 @@ export type AspectGroup = {
   key: string;
   label: string;
   value: number | string;
+  baseValue?: number | string;
   characteristics: CharacteristicEntry[];
 };
 
