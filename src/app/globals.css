@@ -60,7 +60,7 @@
 @layer utilities {
   .surface-grid {
     background-image:
-      linear-gradient(180deg, hsl(var(--background) / 0.56), hsl(var(--background) / 0.74)),
+      linear-gradient(180deg, hsl(var(--background) / 0.42), hsl(var(--background) / 0.62)),
       url("/154_bg_Nl-5m6h_s0bogm4-h0ctrNlwa.jpg");
     background-attachment: fixed;
     background-position:
