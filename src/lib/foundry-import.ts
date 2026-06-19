@@ -435,7 +435,7 @@ function addOverdriveGain(gains: Map<string, number>, key: string, value: number
     return;
   }
 
-  gains.set(key, (gains.get(key) ?? 0) + value);
+  gains.set(key, Math.max(gains.get(key) ?? 0, value));
 }
 
 function addArmorOverdrives(gains: Map<string, number>, overdrives: Record<string, unknown>) {
