@@ -269,16 +269,17 @@ function readGaugeAdjustment(record: Record<string, unknown>) {
   return bonus - malus;
 }
 
-function normalizeHealthGauge(record: Record<string, unknown>, fallbackCurrent = 0): Gauge {
+function normalizeHealthGauge(record: Record<string, unknown>, computedBase = 0, fallbackCurrent = 0): Gauge {
   const current = pickFirstNumber(record, [["value"], ["current"]], fallbackCurrent);
   const adjustment = readGaugeAdjustment(record);
   const mod = pickFirstNumber(record, [["mod"]], 0);
-  const adjustedCurrent = Math.max(0, current + adjustment);
   const explicitMax = pickFirstNumber(record, [["base"]], 0);
-  const adjustedMax = explicitMax > 0 ? explicitMax + mod + adjustment : adjustedCurrent;
+  const base = computedBase > 0 ? computedBase : explicitMax;
+  const adjustedMax = base > 0 ? base + mod + adjustment : current + mod + adjustment;
+  const adjustedCurrent = current === base ? adjustedMax : Math.min(current, adjustedMax);
 
   return {
-    current: adjustedCurrent,
+    current: Math.max(0, adjustedCurrent),
     max: Math.max(0, adjustedMax)
   };
 }
@@ -435,6 +436,21 @@ function readKnightScore(entry: Record<string, unknown>, progressionGain?: numbe
 
 function readKnightBaseScore(entry: Record<string, unknown>) {
   return pickFirstNumber(entry, [["base"]], 0);
+}
+
+function calculateKnightHealthBase(source: Record<string, unknown>) {
+  const aspects = pickFirstRecord(source, [["aspects"]]);
+  const chair = readRecord(aspects.chair);
+  const characteristics = readRecord(chair.caracteristiques);
+  const progressionGains = parseKnightProgressionGains(source);
+  const highestHealthCharacteristic = ["deplacement", "force", "endurance"].reduce((highest, key) => {
+    const characteristic = readRecord(characteristics[key]);
+    const progressionGain = progressionGains.has(key) ? progressionGains.get(key) : undefined;
+
+    return Math.max(highest, readKnightScore(characteristic, progressionGain));
+  }, 0);
+
+  return highestHealthCharacteristic > 0 ? highestHealthCharacteristic * 6 + 10 : 0;
 }
 
 function readKnightOverdrive(entry: Record<string, unknown>) {
@@ -1352,7 +1368,7 @@ export function normalizeFoundryKnightActor(actor: FoundryKnightActor): KnightCh
     secondaryMotivations: motivationItems.secondaryMotivations,
     languages,
     distinctions,
-    health: normalizeHealthGauge(readRecord(system.sante)),
+    health: normalizeHealthGauge(readRecord(system.sante), calculateKnightHealthBase(system)),
     hope: normalizeHopeGauge(readRecord(system.espoir), items),
     heroism: {
       current: Math.min(importedHeroism.current, 6),
