@@ -41,7 +41,7 @@ export function DashboardShell({ children }: DashboardShellProps) {
   return (
     <div className="min-h-screen surface-grid">
       <div className="mx-auto flex min-h-screen w-full max-w-7xl flex-col px-4 py-4 sm:px-6 lg:px-8">
-        <header className="flex flex-col gap-4 border-b bg-background/95 py-4 backdrop-blur sm:flex-row sm:items-center sm:justify-between">
+        <header className="-mx-4 flex flex-col gap-4 border-b bg-background/95 px-4 py-4 backdrop-blur sm:-mx-6 sm:flex-row sm:items-center sm:justify-between sm:px-6 lg:-mx-8 lg:px-8">
           <div>
             <p className="text-sm font-medium text-muted-foreground">Knight RPG</p>
             <h1 className="text-2xl font-bold tracking-normal">Compagnon de chevalier</h1>
