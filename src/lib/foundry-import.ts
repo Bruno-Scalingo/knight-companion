@@ -699,6 +699,109 @@ function formatItemEvolutionTitle(item: Record<string, unknown>) {
   return name;
 }
 
+function parseItemGloryProgressionBlocks(item: Record<string, unknown>, sourceIndex: number): ProgressionBlock[] {
+  if (isEmptyWeaponTemplateItem(item)) {
+    return [];
+  }
+
+  const type = pickFirstString(item, [["type"]]).toLowerCase();
+  const system = readRecord(item.system);
+  const itemId = pickFirstString(item, [["_id"], ["id"]], `${sourceIndex}`);
+  const itemName = pickFirstString(item, [["name"]], "Évolution importée");
+
+  if (type === "armure") {
+    const evolutionRecord = readRecord(system.evolutions);
+    const evolutionList = readRecord(evolutionRecord.liste);
+    const activeThresholds = Math.max(0, Math.trunc(pickFirstNumber(evolutionRecord, [["paliers"]], 0)));
+    const armorBlocks: ProgressionBlock[] = [
+      {
+        id: `evolution-item-${itemId}`,
+        title: formatItemEvolutionTitle(item),
+        category: "armure",
+        bonusValue: 1,
+        costXp: 0,
+        pointsLabel: "PG",
+        status: "spent",
+        note: `Progression Foundry liée à armure ${itemName}.`,
+        sourceId: `item-${itemId}`,
+        sourceOrder: sourceIndex * 100
+      }
+    ];
+
+    for (const [thresholdKey, thresholdValue] of activeThresholds > 0 ? Object.entries(evolutionList) : []) {
+      const thresholdIndex = Number(thresholdKey);
+
+      if (Number.isFinite(thresholdIndex) && activeThresholds > 0 && thresholdIndex >= activeThresholds) {
+        continue;
+      }
+
+      const threshold = readRecord(thresholdValue);
+      const thresholdCost = pickFirstNumber(threshold, [["value"]], 0);
+      const thresholdOrder = Number.isFinite(thresholdIndex) ? thresholdIndex + 1 : armorBlocks.length;
+
+      armorBlocks.push({
+        id: `evolution-item-${itemId}-palier-${thresholdKey}`,
+        title: `${itemName} palier ${thresholdCost} PG`,
+        category: "armure",
+        bonusValue: 1,
+        costXp: 0,
+        pointsLabel: "PG",
+        status: "spent",
+        note: `Palier d'évolution de la méta-armure ${itemName}.`,
+        sourceId: `item-${itemId}-palier-${thresholdKey}`,
+        sourceOrder: sourceIndex * 100 + thresholdOrder
+      });
+    }
+
+    return armorBlocks;
+  }
+
+  if (type === "module") {
+    const currentLevel = Math.max(0, Math.trunc(readModuleCurrentLevel(system)));
+
+    return Array.from({ length: currentLevel }, (_, index) => {
+      const level = index + 1;
+      const levelCost = Math.max(0, pickFirstNumber(readModuleLevelDetails(system, level), [["prix"]], 0));
+
+      return {
+        id: `evolution-item-${itemId}-niveau-${level}`,
+        title: `${itemName} niveau ${level}`,
+        category: "armure" as const,
+        bonusValue: 1 as const,
+        costXp: levelCost,
+        pointsLabel: "PG" as const,
+        status: "spent" as const,
+        note: `Progression Foundry liée au module ${itemName}, niveau ${level}.`,
+        sourceId: `item-${itemId}-niveau-${level}`,
+        sourceOrder: sourceIndex * 100 + level,
+        sourceCostXp: levelCost > 0 ? levelCost : undefined
+      };
+    });
+  }
+
+  if (type === "arme") {
+    const costGp = readItemGloryCost(item);
+
+    return [
+      {
+        id: `evolution-item-${itemId}`,
+        title: formatItemEvolutionTitle(item),
+        category: "armure" as const,
+        bonusValue: 1 as const,
+        costXp: costGp,
+        pointsLabel: "PG" as const,
+        status: "spent" as const,
+        note: `Progression Foundry liée à arme ${itemName}.`,
+        sourceId: `item-${itemId}`,
+        sourceOrder: sourceIndex * 100,
+        sourceCostXp: costGp > 0 ? costGp : undefined
+      }
+    ];
+  }
+
+  return [];
+}
+
 function parseKnightGloryProgression(source: Record<string, unknown>, items: Record<string, unknown>[]): ProgressionBlock[] {
   const gloryList = pickFirstRecord(source, [["progression", "gloire", "depense", "liste"]]);
   const gloryOther = pickFirstRecord(source, [["progression", "gloire", "depense", "autre"]]);
@@ -723,27 +826,7 @@ function parseKnightGloryProgression(source: Record<string, unknown>, items: Rec
   return entries
     .flatMap((entry) => {
       if (entry.source === "item") {
-        const itemId = pickFirstString(entry.item, [["_id"], ["id"]], `${entry.sourceIndex}`);
-        const itemType = pickFirstString(entry.item, [["type"]], "item");
-        const itemName = pickFirstString(entry.item, [["name"]], "Évolution importée");
-        const costGp = readItemGloryCost(entry.item);
-        const sourceOrder = entry.sourceIndex;
-
-        return [
-          {
-            id: `evolution-item-${itemId}`,
-            title: formatItemEvolutionTitle(entry.item),
-            category: "armure" as const,
-            bonusValue: 1 as const,
-            costXp: costGp,
-            pointsLabel: "PG" as const,
-            status: "spent" as const,
-            note: `Progression Foundry liée à ${itemType} ${itemName}.`,
-            sourceId: `item-${itemId}`,
-            sourceOrder,
-            sourceCostXp: costGp > 0 ? costGp : undefined
-          }
-        ];
+        return parseItemGloryProgressionBlocks(entry.item, entry.sourceIndex);
       }
 
       const gloryEntry = readRecord(entry.value);

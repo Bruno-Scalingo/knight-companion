@@ -308,14 +308,38 @@ function CharacterHeader({
 }
 
 const aspectOrder = ["chair", "bete", "bête", "machine", "dame", "masque"];
+const characteristicOrderByAspect: Record<string, string[]> = {
+  chair: ["deplacement", "force", "endurance"],
+  bete: ["hargne", "combat", "instinct"],
+  bête: ["hargne", "combat", "instinct"],
+  machine: ["tir", "savoir", "technique"],
+  dame: ["aura", "parole", "sangfroid"],
+  masque: ["discretion", "dexterite", "perception"]
+};
 
-function sortAspectGroups(groups: AspectGroup[]) {
-  return [...groups].sort((first, second) => {
-    const firstIndex = aspectOrder.indexOf(first.key.toLowerCase());
-    const secondIndex = aspectOrder.indexOf(second.key.toLowerCase());
+function sortCharacteristicsForAspect(aspectKey: string, characteristics: AspectGroup["characteristics"]) {
+  const order = characteristicOrderByAspect[normalizeCharacteristicKey(aspectKey)] ?? [];
+
+  return [...characteristics].sort((first, second) => {
+    const firstIndex = order.indexOf(normalizeCharacteristicKey(first.key.split("-").at(-1) ?? first.key));
+    const secondIndex = order.indexOf(normalizeCharacteristicKey(second.key.split("-").at(-1) ?? second.key));
 
     return (firstIndex === -1 ? 99 : firstIndex) - (secondIndex === -1 ? 99 : secondIndex);
   });
+}
+
+function sortAspectGroups(groups: AspectGroup[]) {
+  return [...groups]
+    .map((group) => ({
+      ...group,
+      characteristics: sortCharacteristicsForAspect(group.key, group.characteristics)
+    }))
+    .sort((first, second) => {
+      const firstIndex = aspectOrder.indexOf(first.key.toLowerCase());
+      const secondIndex = aspectOrder.indexOf(second.key.toLowerCase());
+
+      return (firstIndex === -1 ? 99 : firstIndex) - (secondIndex === -1 ? 99 : secondIndex);
+    });
 }
 
 function buildFallbackAspectGroups(character: KnightCharacter): AspectGroup[] {
@@ -331,13 +355,16 @@ function buildFallbackAspectGroups(character: KnightCharacter): AspectGroup[] {
     key: attribute.key,
     label: attribute.label,
     value: attribute.value,
-    characteristics: character.skills
-      .filter((skill) => skill.attribute.toLowerCase() === attribute.label.toLowerCase())
-      .map((skill) => ({
-        key: skill.key,
-        label: skill.label,
-        value: skill.value
-      }))
+    characteristics: sortCharacteristicsForAspect(
+      attribute.key,
+      character.skills
+        .filter((skill) => skill.attribute.toLowerCase() === attribute.label.toLowerCase())
+        .map((skill) => ({
+          key: skill.key,
+          label: skill.label,
+          value: skill.value
+        }))
+    )
   }));
 }
 
