@@ -259,12 +259,15 @@ function readGaugeAdjustment(record: Record<string, unknown>) {
 
 function normalizeHealthGauge(record: Record<string, unknown>, fallbackCurrent = 0): Gauge {
   const current = pickFirstNumber(record, [["value"], ["current"]], fallbackCurrent);
-  const adjustedCurrent = Math.max(0, current + readGaugeAdjustment(record));
+  const adjustment = readGaugeAdjustment(record);
+  const mod = pickFirstNumber(record, [["mod"]], 0);
+  const adjustedCurrent = Math.max(0, current + adjustment);
   const explicitMax = pickFirstNumber(record, [["max"], ["base"]], 0);
+  const adjustedMax = explicitMax > 0 ? explicitMax + mod + adjustment : adjustedCurrent;
 
   return {
     current: adjustedCurrent,
-    max: explicitMax > 0 ? explicitMax + readGaugeAdjustment(record) : adjustedCurrent
+    max: Math.max(0, adjustedMax)
   };
 }
 
@@ -583,28 +586,35 @@ function parseKnightProgression(source: Record<string, unknown>): ProgressionBlo
     .flatMap(([id, value], sourceIndex) => {
       const entry = readRecord(value);
       const key = pickFirstString(entry, [["nom"]], id);
+      const normalizedKey = key.toLowerCase();
       const totalBonus = Math.max(0, pickFirstNumber(entry, [["bonus"]], 0));
       const costXp = pickFirstNumber(entry, [["cout"]], 0);
       const sourceOrder = pickFirstNumber(entry, [["addOrder"]], sourceIndex);
-      const category: ProgressionBlock["category"] = knightAspectKeys.has(key.toLowerCase())
+      const blockCount = totalBonus > 0 ? totalBonus : costXp > 0 ? 1 : 0;
+      const category: ProgressionBlock["category"] = knightAspectKeys.has(normalizedKey)
         ? "aspect"
-        : "competence";
+        : normalizedKey === "autre" || normalizedKey === "other"
+          ? "ressource"
+          : "competence";
 
-      return Array.from({ length: totalBonus }, (_, unitIndex) => ({
+      return Array.from({ length: blockCount }, (_, unitIndex) => ({
         id: `progression-${id}-${unitIndex + 1}`,
-        title: `+1 ${humanizeKey(key)}`,
+        title: totalBonus > 0 ? `+1 ${humanizeKey(key)}` : humanizeKey(key),
         category,
         bonusValue: 1 as const,
         costXp: unitIndex === 0 ? costXp : 0,
+        pointsLabel: "XP" as const,
         status: "spent" as const,
         note:
           totalBonus > 1
             ? `Bloc ${unitIndex + 1}/${totalBonus} issu de ${humanizeKey(key)} +${totalBonus}.`
-            : `Bloc issu de ${humanizeKey(key)} +1.`,
+            : totalBonus === 1
+              ? `Bloc issu de ${humanizeKey(key)} +1.`
+              : `Dépense d'expérience liée à ${humanizeKey(key)}.`,
         sourceId: id,
         sourceOrder,
-        unitIndex: unitIndex + 1,
-        unitTotal: totalBonus,
+        unitIndex: totalBonus > 1 ? unitIndex + 1 : undefined,
+        unitTotal: totalBonus > 1 ? totalBonus : undefined,
         sourceCostXp: costXp
       }));
     })
@@ -630,6 +640,74 @@ function parseKnightAvailableXp(source: Record<string, unknown>) {
   }, 0);
 
   return Math.max(0, totalXp - spentXp);
+}
+
+function parseKnightGloryProgression(source: Record<string, unknown>): ProgressionBlock[] {
+  const gloryList = pickFirstRecord(source, [["progression", "gloire", "depense", "liste"]]);
+  const gloryOther = pickFirstRecord(source, [["progression", "gloire", "depense", "autre"]]);
+  const entries = [
+    ...Object.entries(gloryList).map(([id, value]) => ({ id, value, source: "liste" as const })),
+    ...Object.entries(gloryOther).map(([id, value]) => ({ id, value, source: "autre" as const }))
+  ];
+
+  return entries
+    .flatMap(({ id, value, source: entrySource }, sourceIndex) => {
+      const entry = readRecord(value);
+      const key = pickFirstString(entry, [["nom"]], id);
+      const totalBonus = Math.max(0, pickFirstNumber(entry, [["bonus"]], 0));
+      const costGp = Math.abs(pickFirstNumber(entry, [["cout"]], 0));
+      const sourceOrder = pickFirstNumber(entry, [["addOrder"], ["order"]], sourceIndex);
+      const blockCount = totalBonus > 0 ? totalBonus : costGp > 0 ? 1 : 0;
+
+      return Array.from({ length: blockCount }, (_, unitIndex) => ({
+        id: `evolution-${entrySource}-${id}-${unitIndex + 1}`,
+        title: totalBonus > 0 ? `+1 ${humanizeKey(key)}` : key,
+        category: "armure" as const,
+        bonusValue: 1 as const,
+        costXp: unitIndex === 0 ? costGp : 0,
+        pointsLabel: "PG" as const,
+        status: "spent" as const,
+        note:
+          totalBonus > 1
+            ? `Bloc ${unitIndex + 1}/${totalBonus} issu de ${humanizeKey(key)} +${totalBonus}.`
+            : totalBonus === 1
+              ? `Bloc issu de ${humanizeKey(key)} +1.`
+              : `Dépense de gloire liée à ${key}.`,
+        sourceId: `${entrySource}-${id}`,
+        sourceOrder,
+        unitIndex: totalBonus > 1 ? unitIndex + 1 : undefined,
+        unitTotal: totalBonus > 1 ? totalBonus : undefined,
+        sourceCostXp: costGp
+      }));
+    })
+    .sort((first, second) => {
+      const firstOrder = first.sourceOrder ?? 0;
+      const secondOrder = second.sourceOrder ?? 0;
+
+      if (firstOrder !== secondOrder) {
+        return firstOrder - secondOrder;
+      }
+
+      return first.id.localeCompare(second.id);
+    });
+}
+
+function parseKnightAvailableGp(source: Record<string, unknown>) {
+  const glory = pickFirstRecord(source, [["progression", "gloire"]]);
+  const gloryList = pickFirstRecord(source, [["progression", "gloire", "depense", "liste"]]);
+  const gloryOther = pickFirstRecord(source, [["progression", "gloire", "depense", "autre"]]);
+  const totalGp = pickFirstNumber(glory, [["total"]], 0);
+  const spentGp =
+    Object.values(gloryList).reduce<number>((sum, value) => {
+      const entry = readRecord(value);
+      return sum + Math.abs(pickFirstNumber(entry, [["cout"]], 0));
+    }, 0) +
+    Object.values(gloryOther).reduce<number>((sum, value) => {
+      const entry = readRecord(value);
+      return sum + Math.abs(pickFirstNumber(entry, [["cout"]], 0));
+    }, 0);
+
+  return Math.max(0, totalGp - spentGp);
 }
 
 function normalizeEquipmentItem(item: Record<string, unknown>, index: number): EquipmentItem {
@@ -998,6 +1076,7 @@ export function normalizeFoundryKnightActor(actor: FoundryKnightActor): KnightCh
     name: actor.name,
     callsign,
     availableXp: parseKnightAvailableXp(system),
+    availableGp: parseKnightAvailableGp(system),
     portraitUrl: resolvePortraitUrl(actor, callsign),
     age: pickFirstString(system, [["age"], ["identite", "age"], ["identity", "age"]]),
     codename: callsign || pickFirstString(system, [["codename"], ["callsign"], ["alias"]]),
@@ -1036,6 +1115,7 @@ export function normalizeFoundryKnightActor(actor: FoundryKnightActor): KnightCh
     metaArmor: parseMetaArmorFromItems(items, system),
     equipment: [...equipment, ...armorOverdriveEquipment],
     progression,
+    evolutionProgression: parseKnightGloryProgression(system),
     rawFoundryActorId: actor._id,
     attributes,
     skills

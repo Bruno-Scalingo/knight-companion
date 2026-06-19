@@ -7,7 +7,6 @@ import {
   Activity,
   AlertCircle,
   ArrowLeft,
-  CalendarDays,
   Cpu,
   PackageCheck
 } from "lucide-react";
@@ -28,14 +27,13 @@ import { readImportedCharacterById } from "@/lib/imported-character-store";
 import {
   mockCharacter,
   mockEquipment,
-  mockEvolutionEntries,
+  mockEvolutionProgressionBlocks,
   mockMetaArmor,
   mockProgressionBlocks
 } from "@/lib/mock-data";
 import type {
   AspectGroup,
   EquipmentItem,
-  EvolutionEntry,
   ImportedKnightCharacter,
   KnightCharacter,
   MetaArmor,
@@ -51,22 +49,15 @@ const equipmentSlotCopy = {
   other: "Autre"
 } as const;
 
-const evolutionKindCopy = {
-  attribute: "Attribut",
-  skill: "Compétence",
-  armor: "Armure",
-  equipment: "Équipement",
-  narrative: "Narratif"
-} as const;
-
 type ResolvedCharacterData = {
   source: "mock" | "imported";
   character: KnightCharacter;
   metaArmor: MetaArmor | null;
   equipment: EquipmentItem[];
   progression: ProgressionBlock[];
-  evolution: EvolutionEntry[];
+  evolutionProgression: ProgressionBlock[];
   availableXp: number;
+  availableGp: number;
   importedRecord?: ImportedKnightCharacter;
 };
 
@@ -94,8 +85,9 @@ function buildMockCharacterData(): ResolvedCharacterData {
     metaArmor: mockMetaArmor,
     equipment: mockEquipment,
     progression: mockProgressionBlocks,
-    evolution: mockEvolutionEntries,
-    availableXp: 0
+    evolutionProgression: mockEvolutionProgressionBlocks,
+    availableXp: 0,
+    availableGp: 0
   };
 }
 
@@ -128,9 +120,22 @@ function normalizeHeroismGauge(gauge: KnightCharacter["heroism"]) {
 }
 
 function buildImportedCharacterData(record: ImportedKnightCharacter): ResolvedCharacterData {
+  const normalizedDraft = normalizeFoundryKnightActor(record.actor);
   const draft = {
-    ...normalizeFoundryKnightActor(record.actor),
-    ...record.character
+    ...normalizedDraft,
+    ...record.character,
+    portraitUrl: record.character.portraitUrl ?? normalizedDraft.portraitUrl,
+    metaArmor:
+      normalizedDraft.metaArmor && record.character.metaArmor?.imageUrl
+        ? {
+            ...normalizedDraft.metaArmor,
+            imageUrl: record.character.metaArmor.imageUrl
+          }
+        : normalizedDraft.metaArmor,
+    progression: record.character.progression ?? normalizedDraft.progression,
+    evolutionProgression: record.character.evolutionProgression ?? normalizedDraft.evolutionProgression,
+    availableXp: record.character.availableXp ?? normalizedDraft.availableXp,
+    availableGp: record.character.availableGp ?? normalizedDraft.availableGp
   };
 
   return {
@@ -176,8 +181,9 @@ function buildImportedCharacterData(record: ImportedKnightCharacter): ResolvedCh
     metaArmor: draft.metaArmor ?? null,
     equipment: draft.equipment ?? [],
     progression: draft.progression ?? [],
-    evolution: [],
+    evolutionProgression: draft.evolutionProgression ?? [],
     availableXp: draft.availableXp ?? 0,
+    availableGp: draft.availableGp ?? 0,
     importedRecord: record
   };
 }
@@ -486,9 +492,43 @@ function WeaponColumns({
   );
 }
 
+function normalizeCharacteristicKey(key: string) {
+  return key
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "");
+}
+
+function calculateMetaArmorDefenseScore(aspectGroups: AspectGroup[], keys: string[], fallback: number) {
+  const wantedKeys = new Set(keys.map(normalizeCharacteristicKey));
+  const scores = aspectGroups
+    .flatMap((aspect) => aspect.characteristics)
+    .filter((characteristic) => wantedKeys.has(normalizeCharacteristicKey(characteristic.key)))
+    .map((characteristic) => {
+      const score = typeof characteristic.value === "number" ? characteristic.value : Number(characteristic.value);
+      const overdrive = typeof characteristic.overdrive === "number" ? characteristic.overdrive : 0;
+
+      return Number.isFinite(score) ? score + overdrive : null;
+    })
+    .filter((score): score is number => typeof score === "number");
+
+  return scores.length > 0 ? Math.max(...scores) : fallback;
+}
+
 function CharacterSummary({ data }: { data: ResolvedCharacterData }) {
   const { character } = data;
   const aspectGroups = buildFallbackAspectGroups(character);
+  const metaArmorDefense = calculateMetaArmorDefenseScore(
+    aspectGroups,
+    ["hargne", "combat", "instinct"],
+    character.defense
+  );
+  const metaArmorReaction = calculateMetaArmorDefenseScore(
+    aspectGroups,
+    ["tir", "savoir", "technique"],
+    character.reaction
+  );
   const fallbackBiography = character.biography || "Aucune biographie importée pour ce personnage.";
   const advantages = pickEquipmentNamesBySourceType(data.equipment, ["avantage"]);
   const disadvantages = pickEquipmentNamesBySourceType(data.equipment, ["inconvenient", "désavantage"]);
@@ -540,13 +580,13 @@ function CharacterSummary({ data }: { data: ResolvedCharacterData }) {
         </Card>
       </section>
 
-      <section className="grid gap-4 lg:grid-cols-[1fr_18rem]">
+      <section className="grid gap-4 lg:grid-cols-[1fr_18rem_18rem]">
         <Card>
           <CardHeader>
             <CardTitle>Ressources</CardTitle>
             <CardDescription>Valeurs actuelles du personnage.</CardDescription>
           </CardHeader>
-          <CardContent className="grid gap-3 md:grid-cols-3">
+          <CardContent className="grid gap-3">
             <GaugeCard label="Santé" gauge={character.health} />
             <GaugeCard label="Espoir" gauge={character.hope} tone="accent" />
             <GaugeCard label="Héroïsme" gauge={character.heroism} tone="secondary" />
@@ -562,6 +602,18 @@ function CharacterSummary({ data }: { data: ResolvedCharacterData }) {
             <NumericStat label="Égide" value={character.aegis} />
             <NumericStat label="Défense" value={character.defense} />
             <NumericStat label="Réaction" value={character.reaction} />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Défenses (en Méta-Armure)</CardTitle>
+            <CardDescription>Scores de défense avec la Méta-Armure</CardDescription>
+          </CardHeader>
+          <CardContent className="grid grid-cols-3 gap-2 lg:grid-cols-1">
+            <NumericStat label="Égide" value={character.aegis} />
+            <NumericStat label="Défense" value={metaArmorDefense} />
+            <NumericStat label="Réaction" value={metaArmorReaction} />
           </CardContent>
         </Card>
       </section>
@@ -989,10 +1041,8 @@ export function CharacterEquipmentView({ characterId }: CharacterViewProps) {
   );
 }
 
-const progressionOrderStoragePrefix = "knight-companion:progression-order";
-
-function readStoredProgressionOrder(characterId: string) {
-  const rawOrder = window.localStorage.getItem(`${progressionOrderStoragePrefix}:${characterId}`);
+function readStoredBlockOrder(storageKeyPrefix: string, characterId: string) {
+  const rawOrder = window.localStorage.getItem(`${storageKeyPrefix}:${characterId}`);
 
   if (!rawOrder) {
     return [];
@@ -1002,12 +1052,12 @@ function readStoredProgressionOrder(characterId: string) {
     const parsed = JSON.parse(rawOrder);
     return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === "string") : [];
   } catch (error) {
-    console.error("[Progression] Impossible de relire l'ordre manuel", error);
+    console.error("[Timeline] Impossible de relire l'ordre manuel", error);
     return [];
   }
 }
 
-function applyProgressionOrder(blocks: ProgressionBlock[], orderedIds: string[]) {
+function applyBlockOrder(blocks: ProgressionBlock[], orderedIds: string[]) {
   if (orderedIds.length === 0) {
     return blocks;
   }
@@ -1022,15 +1072,15 @@ function applyProgressionOrder(blocks: ProgressionBlock[], orderedIds: string[])
   return [...orderedStoredBlocks, ...newBlocks];
 }
 
-function saveProgressionOrder(characterId: string, blocks: ProgressionBlock[]) {
+function saveBlockOrder(storageKeyPrefix: string, characterId: string, blocks: ProgressionBlock[]) {
   window.localStorage.setItem(
-    `${progressionOrderStoragePrefix}:${characterId}`,
+    `${storageKeyPrefix}:${characterId}`,
     JSON.stringify(blocks.map((block) => block.id))
   );
 }
 
-async function fetchProgressionOrder(characterId: string) {
-  const response = await fetch(`/api/characters/${characterId}/progression-order`);
+async function fetchBlockOrder(orderApiPath: string) {
+  const response = await fetch(orderApiPath);
 
   if (!response.ok) {
     const payload = (await response.json().catch(() => null)) as { error?: string } | null;
@@ -1041,8 +1091,8 @@ async function fetchProgressionOrder(characterId: string) {
   return Array.isArray(payload.blockIds) ? payload.blockIds.filter((id): id is string => typeof id === "string") : [];
 }
 
-async function saveProgressionOrderToServer(characterId: string, blocks: ProgressionBlock[]) {
-  const response = await fetch(`/api/characters/${characterId}/progression-order`, {
+async function saveBlockOrderToServer(orderApiPath: string, blocks: ProgressionBlock[]) {
+  const response = await fetch(orderApiPath, {
     method: "PUT",
     headers: {
       "Content-Type": "application/json"
@@ -1058,7 +1108,7 @@ async function saveProgressionOrderToServer(characterId: string, blocks: Progres
   }
 }
 
-function moveProgressionBlock(blocks: ProgressionBlock[], fromIndex: number, toIndex: number) {
+function moveBlock(blocks: ProgressionBlock[], fromIndex: number, toIndex: number) {
   const nextBlocks = [...blocks];
   const [movedBlock] = nextBlocks.splice(fromIndex, 1);
 
@@ -1070,31 +1120,45 @@ function moveProgressionBlock(blocks: ProgressionBlock[], fromIndex: number, toI
   return nextBlocks;
 }
 
-function ProgressionTimeline({
+function OrderedBlocksTimeline({
   characterId,
-  progression,
-  availableXp,
+  blocks,
+  availablePoints,
   access,
-  useSharedOrder
+  useSharedOrder,
+  storageKeyPrefix,
+  orderApiPath,
+  countLabel,
+  availableLabel,
+  spentLabel,
+  emptyMessage,
+  logPrefix
 }: {
   characterId: string;
-  progression: ProgressionBlock[];
-  availableXp: number;
+  blocks: ProgressionBlock[];
+  availablePoints: number;
   access: AccessContext;
   useSharedOrder: boolean;
+  storageKeyPrefix: string;
+  orderApiPath: string;
+  countLabel: string;
+  availableLabel: string;
+  spentLabel: string;
+  emptyMessage: string;
+  logPrefix: string;
 }) {
-  const [orderedProgression, setOrderedProgression] = useState<ProgressionBlock[]>([]);
+  const [orderedBlocks, setOrderedBlocks] = useState<ProgressionBlock[]>([]);
   const [orderStatus, setOrderStatus] = useState<"idle" | "loading" | "saving" | "saved" | "error">("idle");
   const [orderMessage, setOrderMessage] = useState<string | null>(null);
   const canReorder = canEdit(access);
-  const spentXp = orderedProgression.reduce((total, block) => total + block.costXp, 0);
+  const spentPoints = orderedBlocks.reduce((total, block) => total + block.costXp, 0);
 
   useEffect(() => {
     let cancelled = false;
-    const localOrder = readStoredProgressionOrder(characterId);
-    const locallyOrderedProgression = applyProgressionOrder(progression, localOrder);
+    const localOrder = readStoredBlockOrder(storageKeyPrefix, characterId);
+    const locallyOrderedBlocks = applyBlockOrder(blocks, localOrder);
 
-    setOrderedProgression(locallyOrderedProgression);
+    setOrderedBlocks(locallyOrderedBlocks);
     setOrderMessage(null);
 
     if (!useSharedOrder) {
@@ -1104,23 +1168,23 @@ function ProgressionTimeline({
 
     setOrderStatus("loading");
 
-    async function loadSharedProgressionOrder() {
+    async function loadSharedBlockOrder() {
       try {
-        const sharedOrder = await fetchProgressionOrder(characterId);
+        const sharedOrder = await fetchBlockOrder(orderApiPath);
 
         if (cancelled) {
           return;
         }
 
         if (sharedOrder.length > 0) {
-          setOrderedProgression(applyProgressionOrder(progression, sharedOrder));
+          setOrderedBlocks(applyBlockOrder(blocks, sharedOrder));
           setOrderStatus("idle");
           return;
         }
 
         if (canReorder && localOrder.length > 0) {
-          await saveProgressionOrderToServer(characterId, locallyOrderedProgression);
-          console.log("[Progression] Ordre local migré en base", { characterId, order: localOrder });
+          await saveBlockOrderToServer(orderApiPath, locallyOrderedBlocks);
+          console.log(`[${logPrefix}] Ordre local migré en base`, { characterId, order: localOrder });
 
           if (!cancelled) {
             setOrderStatus("saved");
@@ -1132,7 +1196,7 @@ function ProgressionTimeline({
 
         setOrderStatus("idle");
       } catch (error) {
-        console.warn("[Progression] Lecture de l'ordre partagé impossible, fallback local", error);
+        console.warn(`[${logPrefix}] Lecture de l'ordre partagé impossible, fallback local`, error);
 
         if (!cancelled) {
           setOrderStatus("error");
@@ -1145,18 +1209,18 @@ function ProgressionTimeline({
       }
     }
 
-    void loadSharedProgressionOrder();
+    void loadSharedBlockOrder();
 
     return () => {
       cancelled = true;
     };
-  }, [canReorder, characterId, progression, useSharedOrder]);
+  }, [blocks, canReorder, characterId, logPrefix, orderApiPath, storageKeyPrefix, useSharedOrder]);
 
   function handleMove(fromIndex: number, toIndex: number) {
-    setOrderedProgression((currentBlocks) => {
-      const nextBlocks = moveProgressionBlock(currentBlocks, fromIndex, toIndex);
-      saveProgressionOrder(characterId, nextBlocks);
-      console.log("[Progression] Ordre manuel sauvegardé", {
+    setOrderedBlocks((currentBlocks) => {
+      const nextBlocks = moveBlock(currentBlocks, fromIndex, toIndex);
+      saveBlockOrder(storageKeyPrefix, characterId, nextBlocks);
+      console.log(`[${logPrefix}] Ordre manuel sauvegardé`, {
         characterId,
         order: nextBlocks.map((block) => block.id)
       });
@@ -1168,13 +1232,13 @@ function ProgressionTimeline({
       setOrderStatus("saving");
       setOrderMessage("Sauvegarde de l'ordre en cours.");
 
-      void saveProgressionOrderToServer(characterId, nextBlocks)
+      void saveBlockOrderToServer(orderApiPath, nextBlocks)
         .then(() => {
           setOrderStatus("saved");
           setOrderMessage("Ordre sauvegardé en base.");
         })
         .catch((error) => {
-          console.error("[Progression] Sauvegarde serveur impossible", error);
+          console.error(`[${logPrefix}] Sauvegarde serveur impossible`, error);
           setOrderStatus("error");
           setOrderMessage(
             error instanceof Error
@@ -1187,11 +1251,11 @@ function ProgressionTimeline({
     });
   }
 
-  if (orderedProgression.length === 0) {
+  if (orderedBlocks.length === 0) {
     return (
       <Card>
         <CardContent className="p-4 text-sm text-muted-foreground">
-          Aucune progression structurée n'a encore été importée pour ce personnage.
+          {emptyMessage}
         </CardContent>
       </Card>
     );
@@ -1202,20 +1266,20 @@ function ProgressionTimeline({
       <section className="grid gap-4 sm:grid-cols-3">
         <Card>
           <CardHeader>
-            <CardDescription>Nombre de progressions</CardDescription>
-            <CardTitle>{orderedProgression.length}</CardTitle>
+            <CardDescription>{countLabel}</CardDescription>
+            <CardTitle>{orderedBlocks.length}</CardTitle>
           </CardHeader>
         </Card>
         <Card>
           <CardHeader>
-            <CardDescription>XP Disponible</CardDescription>
-            <CardTitle>{availableXp}</CardTitle>
+            <CardDescription>{availableLabel}</CardDescription>
+            <CardTitle>{availablePoints}</CardTitle>
           </CardHeader>
         </Card>
         <Card>
           <CardHeader>
-            <CardDescription>XP Dépensés</CardDescription>
-            <CardTitle>{spentXp}</CardTitle>
+            <CardDescription>{spentLabel}</CardDescription>
+            <CardTitle>{spentPoints}</CardTitle>
           </CardHeader>
         </Card>
       </section>
@@ -1233,13 +1297,13 @@ function ProgressionTimeline({
       ) : null}
 
       <section className="space-y-3">
-        {orderedProgression.map((block, index) => (
+        {orderedBlocks.map((block, index) => (
           <ProgressionBlockCard
             key={block.id}
             block={block}
             canReorder={canReorder}
             isFirst={index === 0}
-            isLast={index === orderedProgression.length - 1}
+            isLast={index === orderedBlocks.length - 1}
             position={index + 1}
             onMoveUp={() => handleMove(index, index - 1)}
             onMoveDown={() => handleMove(index, index + 1)}
@@ -1254,7 +1318,7 @@ export function CharacterProgressionView({ characterId }: CharacterViewProps) {
   const state = useResolvedCharacterData(characterId);
 
   if (state.status === "loading") {
-    return <CharacterLoadingState title="Progression" description="Chargement de la progression du personnage." />;
+    return <CharacterLoadingState title="Expérience" description="Chargement de l'expérience du personnage." />;
   }
 
   if (state.status === "error") {
@@ -1267,18 +1331,25 @@ export function CharacterProgressionView({ characterId }: CharacterViewProps) {
   return (
     <div className="space-y-6">
       <CharacterHeader
-        title="Progression"
+        title="Expérience"
         description="Progression chronologique de l'expérience du chevalier."
         data={data}
         access={access}
       />
 
-      <ProgressionTimeline
+      <OrderedBlocksTimeline
         characterId={characterId}
-        progression={data.progression}
-        availableXp={data.availableXp}
+        blocks={data.progression}
+        availablePoints={data.availableXp}
         access={access}
         useSharedOrder={data.source === "imported"}
+        storageKeyPrefix="knight-companion:progression-order"
+        orderApiPath={`/api/characters/${characterId}/progression-order`}
+        countLabel="Nombre de progressions"
+        availableLabel="XP Disponible"
+        spentLabel="XP Dépensés"
+        emptyMessage="Aucune progression structurée n'a encore été importée pour ce personnage."
+        logPrefix="Progression"
       />
     </div>
   );
@@ -1288,7 +1359,7 @@ export function CharacterEvolutionView({ characterId }: CharacterViewProps) {
   const state = useResolvedCharacterData(characterId);
 
   if (state.status === "loading") {
-    return <CharacterLoadingState title="Évolution" description="Chargement de l'historique du personnage." />;
+    return <CharacterLoadingState title="Évolution" description="Chargement des évolutions de la méta-armure." />;
   }
 
   if (state.status === "error") {
@@ -1296,50 +1367,31 @@ export function CharacterEvolutionView({ characterId }: CharacterViewProps) {
   }
 
   const { data } = state;
+  const access = adminAccess;
 
   return (
     <div className="space-y-6">
       <CharacterHeader
         title="Évolution"
-        description="Historique des améliorations appliquées et prochains jalons de campagne."
+        description="Progression chronologique de la gloire et des évolutions de la méta-armure."
         data={data}
+        access={access}
       />
 
-      {data.evolution.length > 0 ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>Journal d'évolution</CardTitle>
-            <CardDescription>Chronologie des gains, modules et décisions marquantes.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-0">
-            {data.evolution.map((entry, index) => (
-              <div key={entry.id}>
-                <article className="grid gap-4 py-4 sm:grid-cols-[10rem_1fr_auto] sm:items-start">
-                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <CalendarDays className="h-4 w-4" aria-hidden="true" />
-                    {entry.date}
-                  </div>
-                  <div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <h3 className="font-semibold">{entry.title}</h3>
-                      <Badge variant="outline">{evolutionKindCopy[entry.kind]}</Badge>
-                    </div>
-                    <p className="mt-2 text-sm leading-6 text-muted-foreground">{entry.description}</p>
-                  </div>
-                  <Badge variant="secondary">{entry.xpCost} PX</Badge>
-                </article>
-                {index < data.evolution.length - 1 ? <Separator /> : null}
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-      ) : (
-        <Card>
-          <CardContent className="p-4 text-sm text-muted-foreground">
-            Aucun historique d'évolution n'a été importé pour ce personnage.
-          </CardContent>
-        </Card>
-      )}
+      <OrderedBlocksTimeline
+        characterId={characterId}
+        blocks={data.evolutionProgression}
+        availablePoints={data.availableGp}
+        access={access}
+        useSharedOrder={data.source === "imported"}
+        storageKeyPrefix="knight-companion:evolution-order"
+        orderApiPath={`/api/characters/${characterId}/evolution-order`}
+        countLabel="Nombre d'évolutions"
+        availableLabel="PG Disponible"
+        spentLabel="PG Dépensés"
+        emptyMessage="Aucune évolution de méta-armure n'a encore été importée pour ce personnage."
+        logPrefix="Evolution"
+      />
     </div>
   );
 }

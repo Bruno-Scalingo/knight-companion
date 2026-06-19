@@ -147,6 +147,7 @@ export type ProgressionBlock = {
   category: "aspect" | "attribut" | "competence" | "armure" | "ressource";
   bonusValue: 1;
   costXp: number;
+  pointsLabel?: "XP" | "PG";
   status: "available" | "spent" | "locked";
   note: string;
   sourceId?: string;
@@ -179,6 +180,7 @@ export type KnightCharacterDraft = {
   name: string;
   callsign?: string;
   availableXp?: number;
+  availableGp?: number;
   portraitUrl?: string;
   age?: string;
   codename?: string;
@@ -212,6 +214,7 @@ export type KnightCharacterDraft = {
   metaArmor?: MetaArmor | null;
   equipment?: EquipmentItem[];
   progression?: ProgressionBlock[];
+  evolutionProgression?: ProgressionBlock[];
   attributes: AttributeScore[];
   skills: SkillScore[];
   rawFoundryActorId?: string;

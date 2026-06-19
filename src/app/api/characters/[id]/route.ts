@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { normalizeFoundryKnightActor } from "@/lib/foundry-import";
 import { prisma } from "@/lib/prisma";
 import type { FoundryKnightActor, KnightCharacterDraft, ProgressionBlock } from "@/types/knight";
 
@@ -13,7 +14,7 @@ function readProgressionOrderIds(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((id): id is string => typeof id === "string") : [];
 }
 
-function applyProgressionOrder(blocks: ProgressionBlock[] | undefined, orderedIds: string[]) {
+function applyBlockOrder(blocks: ProgressionBlock[] | undefined, orderedIds: string[]) {
   if (!blocks || blocks.length === 0 || orderedIds.length === 0) {
     return blocks ?? [];
   }
@@ -48,6 +49,11 @@ export async function GET(_request: Request, { params }: CharacterRouteContext) 
         select: {
           blockIds: true
         }
+      },
+      evolutionOrder: {
+        select: {
+          blockIds: true
+        }
       }
     }
   });
@@ -57,8 +63,11 @@ export async function GET(_request: Request, { params }: CharacterRouteContext) 
     return NextResponse.json({ error: "Personnage introuvable." }, { status: 404 });
   }
 
-  const normalizedCharacter = latestImport.normalizedJson as KnightCharacterDraft;
+  const actor = latestImport.rawJson as FoundryKnightActor;
+  const storedCharacter = latestImport.normalizedJson as KnightCharacterDraft;
+  const normalizedCharacter = normalizeFoundryKnightActor(actor);
   const progressionOrder = readProgressionOrderIds(character.progressionOrder?.blockIds);
+  const evolutionOrder = readProgressionOrderIds(character.evolutionOrder?.blockIds);
 
   const metaArmorImageUrl = character.metaArmorImage ? `/api/characters/${character.id}/meta-armor-image` : undefined;
 
@@ -66,18 +75,24 @@ export async function GET(_request: Request, { params }: CharacterRouteContext) 
     id: character.id,
     importedAt: latestImport.createdAt.toISOString(),
     sourceFileName: latestImport.fileName ?? undefined,
-    actor: latestImport.rawJson as FoundryKnightActor,
+    actor,
     character: {
       ...normalizedCharacter,
-      portraitUrl: character.portraitUrl ?? normalizedCharacter.portraitUrl,
+      portraitUrl: character.portraitUrl ?? storedCharacter.portraitUrl ?? normalizedCharacter.portraitUrl,
       metaArmor:
         normalizedCharacter.metaArmor && metaArmorImageUrl
           ? {
               ...normalizedCharacter.metaArmor,
               imageUrl: metaArmorImageUrl
             }
-          : normalizedCharacter.metaArmor,
-      progression: applyProgressionOrder(normalizedCharacter.progression, progressionOrder)
+          : storedCharacter.metaArmor?.imageUrl && normalizedCharacter.metaArmor
+            ? {
+                ...normalizedCharacter.metaArmor,
+                imageUrl: storedCharacter.metaArmor.imageUrl
+              }
+            : normalizedCharacter.metaArmor,
+      progression: applyBlockOrder(normalizedCharacter.progression, progressionOrder),
+      evolutionProgression: applyBlockOrder(normalizedCharacter.evolutionProgression, evolutionOrder)
     }
   });
 }

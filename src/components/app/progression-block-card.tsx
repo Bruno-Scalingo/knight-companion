@@ -98,7 +98,9 @@ export function ProgressionBlockCard({
           </Badge>
         ) : null}
         {block.sourceCostXp && block.sourceCostXp > 0 ? (
-          <Badge variant="muted">{block.sourceCostXp} PX source</Badge>
+          <Badge variant="muted">
+            {block.sourceCostXp} {block.pointsLabel ?? "XP"} source
+          </Badge>
         ) : null}
       </CardContent>
     </Card>

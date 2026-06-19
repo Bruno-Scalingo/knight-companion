@@ -1,6 +1,5 @@
 import type {
   EquipmentItem,
-  EvolutionEntry,
   KnightCharacter,
   MetaArmor,
   ProgressionBlock
@@ -246,34 +245,41 @@ export const mockProgressionBlocks: ProgressionBlock[] = [
     category: "ressource",
     bonusValue: 1,
     costXp: 7,
+    pointsLabel: "XP",
     status: "locked",
     note: "Verrouillé jusqu'au prochain jalon narratif."
   }
 ];
 
-export const mockEvolutionEntries: EvolutionEntry[] = [
+export const mockEvolutionProgressionBlocks: ProgressionBlock[] = [
   {
-    id: "evo-001",
-    date: "2048-03-11",
-    title: "Tir +1",
-    kind: "skill",
-    description: "Entraînement intensif au tir mobile après l'opération Verre Noir.",
-    xpCost: 4
+    id: "evo-prog-001",
+    title: "Reprise Wingsuit",
+    category: "armure",
+    bonusValue: 1,
+    costXp: 10,
+    pointsLabel: "PG",
+    status: "spent",
+    note: "Dépense de gloire liée à la reprise du Wingsuit."
   },
   {
-    id: "evo-002",
-    date: "2048-03-18",
-    title: "Noyau tactique installé",
-    kind: "armor",
-    description: "Amélioration de la méta-armure pour mieux coordonner l'escouade.",
-    xpCost: 5
+    id: "evo-prog-002",
+    title: "Conversion PA en Shotguns",
+    category: "armure",
+    bonusValue: 1,
+    costXp: 25,
+    pointsLabel: "PG",
+    status: "spent",
+    note: "Dépense de gloire liée à l'évolution de l'armement."
   },
   {
-    id: "evo-003",
-    date: "À planifier",
-    title: "Force +1",
-    kind: "attribute",
-    description: "Bloc de progression prêt, en attente de validation administrateur.",
-    xpCost: 6
+    id: "evo-prog-003",
+    title: "Conversion Bouclier en Pavois",
+    category: "armure",
+    bonusValue: 1,
+    costXp: 25,
+    pointsLabel: "PG",
+    status: "spent",
+    note: "Dépense de gloire liée à la configuration défensive."
   }
 ];

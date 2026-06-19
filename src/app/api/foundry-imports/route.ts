@@ -35,7 +35,7 @@ function readProgressionOrderIds(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((id): id is string => typeof id === "string") : [];
 }
 
-function applyProgressionOrder(blocks: ProgressionBlock[] | undefined, orderedIds: string[]) {
+function applyBlockOrder(blocks: ProgressionBlock[] | undefined, orderedIds: string[]) {
   if (!blocks || blocks.length === 0 || orderedIds.length === 0) {
     return blocks ?? [];
   }
@@ -143,6 +143,11 @@ export async function POST(request: Request) {
           select: {
             blockIds: true
           }
+        },
+        evolutionOrder: {
+          select: {
+            blockIds: true
+          }
         }
       }
     });
@@ -152,6 +157,7 @@ export async function POST(request: Request) {
         ? `/api/characters/${characterId}/meta-armor-image`
         : normalizedCharacterWithPortrait.metaArmor?.imageUrl;
     const storedProgressionOrder = readProgressionOrderIds(existingCharacter?.progressionOrder?.blockIds);
+    const storedEvolutionOrder = readProgressionOrderIds(existingCharacter?.evolutionOrder?.blockIds);
     const persistedNormalizedCharacter: KnightCharacterDraft = {
       ...normalizedCharacterWithPortrait,
       portraitUrl: preservedPortraitUrl,
@@ -161,7 +167,8 @@ export async function POST(request: Request) {
             imageUrl: preservedMetaArmorImageUrl
           }
         : normalizedCharacterWithPortrait.metaArmor,
-      progression: applyProgressionOrder(normalizedCharacterWithPortrait.progression, storedProgressionOrder)
+      progression: applyBlockOrder(normalizedCharacterWithPortrait.progression, storedProgressionOrder),
+      evolutionProgression: applyBlockOrder(normalizedCharacterWithPortrait.evolutionProgression, storedEvolutionOrder)
     };
     const rawActorJson = toPrismaJson(validation.actor);
     const normalizedJson = toPrismaJson(persistedNormalizedCharacter);
