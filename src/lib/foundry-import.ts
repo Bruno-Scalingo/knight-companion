@@ -67,6 +67,18 @@ function readBoolean(value: unknown, fallback = false) {
   return typeof value === "boolean" ? value : fallback;
 }
 
+function readFoundryBoolean(value: unknown, fallback = false) {
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  if (typeof value === "string") {
+    return value.toLowerCase() === "true" ? true : value.toLowerCase() === "false" ? false : fallback;
+  }
+
+  return fallback;
+}
+
 function humanizeKey(key: string) {
   if (knightScoreLabels[key]) {
     return knightScoreLabels[key];
@@ -262,7 +274,7 @@ function normalizeHealthGauge(record: Record<string, unknown>, fallbackCurrent =
   const adjustment = readGaugeAdjustment(record);
   const mod = pickFirstNumber(record, [["mod"]], 0);
   const adjustedCurrent = Math.max(0, current + adjustment);
-  const explicitMax = pickFirstNumber(record, [["max"], ["base"]], 0);
+  const explicitMax = pickFirstNumber(record, [["base"]], 0);
   const adjustedMax = explicitMax > 0 ? explicitMax + mod + adjustment : adjustedCurrent;
 
   return {
@@ -280,6 +292,38 @@ function normalizeHopeGauge(record: Record<string, unknown>, fallbackCurrent = 0
   return {
     current,
     max: explicitMax > 0 ? explicitMax + maxBonus : Math.max(current, computedMax)
+  };
+}
+
+function normalizeArmorEnergyGauge(source: Record<string, unknown>, items: Record<string, unknown>[]) {
+  const armorItem = items.find((item) => pickFirstString(item, [["type"]]).toLowerCase() === "armure");
+  const armorSystem = readRecord(armorItem?.system);
+  const equippedArmor = readRecord(readRecord(source.equipements).armure);
+  const equippedArmorEnergy = readRecord(equippedArmor.energie);
+  const fallbackEnergy = readRecord(source.energie);
+  const max = pickFirstNumber(armorSystem, [["energie", "base"]], 0) + readModuleBonusAtCurrentLevel(items, "energie");
+  const current = pickFirstNumber(equippedArmorEnergy, [["value"], ["current"]], pickFirstNumber(fallbackEnergy, [["value"]], max));
+  const adjustedCurrent = Math.max(0, current + readGaugeAdjustment(equippedArmorEnergy));
+
+  return {
+    current: adjustedCurrent,
+    max: max > 0 ? max : Math.max(adjustedCurrent, pickFirstNumber(fallbackEnergy, [["max"], ["base"]], 0))
+  };
+}
+
+function normalizeArmorPointsGauge(source: Record<string, unknown>, items: Record<string, unknown>[]) {
+  const armorItem = items.find((item) => pickFirstString(item, [["type"]]).toLowerCase() === "armure");
+  const armorSystem = readRecord(armorItem?.system);
+  const equippedArmor = readRecord(readRecord(source.equipements).armure);
+  const equippedArmorPoints = readRecord(equippedArmor.armure);
+  const fallbackArmor = readRecord(source.armure);
+  const max = pickFirstNumber(armorSystem, [["armure", "base"]], 0) + readModuleBonusAtCurrentLevel(items, "armure");
+  const current = pickFirstNumber(equippedArmorPoints, [["value"], ["current"]], max || pickFirstNumber(fallbackArmor, [["value"]], 0));
+  const adjustedCurrent = Math.max(0, current + readGaugeAdjustment(equippedArmorPoints));
+
+  return {
+    current: max > 0 ? Math.min(adjustedCurrent, max) : adjustedCurrent,
+    max: max > 0 ? max : Math.max(adjustedCurrent, pickFirstNumber(fallbackArmor, [["max"], ["base"]], 0))
   };
 }
 
@@ -663,6 +707,24 @@ function readModuleCurrentLevelDetails(system: Record<string, unknown>) {
   return readModuleLevelDetails(system, currentLevel);
 }
 
+function readModuleLevelGloryCost(system: Record<string, unknown>, level: number) {
+  const details = readModuleLevelDetails(system, level);
+
+  if (readFoundryBoolean(details.gratuit) || readFoundryBoolean(system.gratuit)) {
+    return 0;
+  }
+
+  return Math.max(0, pickFirstNumber(details, [["prix"]], 0));
+}
+
+function readWeaponGloryCost(system: Record<string, unknown>) {
+  if (readFoundryBoolean(system.gratuit)) {
+    return 0;
+  }
+
+  return Math.max(0, pickFirstNumber(system, [["prix"]], 0));
+}
+
 function readItemGloryCost(item: Record<string, unknown>) {
   const type = pickFirstString(item, [["type"]]).toLowerCase();
   const system = readRecord(item.system);
@@ -671,12 +733,12 @@ function readItemGloryCost(item: Record<string, unknown>) {
     const currentLevel = Math.max(0, Math.trunc(readModuleCurrentLevel(system)));
 
     return Array.from({ length: currentLevel }, (_, index) => index + 1).reduce((sum, level) => {
-      return sum + Math.max(0, pickFirstNumber(readModuleLevelDetails(system, level), [["prix"]], 0));
+      return sum + readModuleLevelGloryCost(system, level);
     }, 0);
   }
 
   if (type === "arme") {
-    return Math.max(0, pickFirstNumber(system, [["prix"]], 0));
+    return readWeaponGloryCost(system);
   }
 
   return 0;
@@ -761,7 +823,7 @@ function parseItemGloryProgressionBlocks(item: Record<string, unknown>, sourceIn
 
     return Array.from({ length: currentLevel }, (_, index) => {
       const level = index + 1;
-      const levelCost = Math.max(0, pickFirstNumber(readModuleLevelDetails(system, level), [["prix"]], 0));
+      const levelCost = readModuleLevelGloryCost(system, level);
 
       return {
         id: `evolution-item-${itemId}-niveau-${level}`,
@@ -774,13 +836,13 @@ function parseItemGloryProgressionBlocks(item: Record<string, unknown>, sourceIn
         note: `Progression Foundry liée au module ${itemName}, niveau ${level}.`,
         sourceId: `item-${itemId}-niveau-${level}`,
         sourceOrder: sourceIndex * 100 + level,
-        sourceCostXp: levelCost > 0 ? levelCost : undefined
+        sourceCostXp: levelCost
       };
     });
   }
 
   if (type === "arme") {
-    const costGp = readItemGloryCost(item);
+    const costGp = readWeaponGloryCost(system);
 
     return [
       {
@@ -794,7 +856,7 @@ function parseItemGloryProgressionBlocks(item: Record<string, unknown>, sourceIn
         note: `Progression Foundry liée à arme ${itemName}.`,
         sourceId: `item-${itemId}`,
         sourceOrder: sourceIndex * 100,
-        sourceCostXp: costGp > 0 ? costGp : undefined
+        sourceCostXp: costGp
       }
     ];
   }
@@ -807,7 +869,7 @@ function parseKnightGloryProgression(source: Record<string, unknown>, items: Rec
   const gloryOther = pickFirstRecord(source, [["progression", "gloire", "depense", "autre"]]);
   const entries = [
     ...items
-      .filter((item) => ["armure", "arme", "module"].includes(pickFirstString(item, [["type"]]).toLowerCase()))
+      .filter((item) => ["arme", "module"].includes(pickFirstString(item, [["type"]]).toLowerCase()))
       .map((item, sourceIndex) => ({ item, sourceIndex, source: "item" as const })),
     ...Object.entries(gloryList).map(([id, value], sourceIndex) => ({
       id,
@@ -1033,7 +1095,7 @@ function isEmptyWeaponTemplateItem(item: Record<string, unknown>) {
 
 function readModuleBonusAtCurrentLevel(
   items: Record<string, unknown>[],
-  bonusKey: "champDeForce" | "armure",
+  bonusKey: "champDeForce" | "armure" | "energie",
 ) {
   let total = 0;
 
@@ -1079,8 +1141,9 @@ function parseMetaArmorFromItems(items: Record<string, unknown>[], system: Recor
   };
   const armorName = pickFirstString(armorItem, [["name"]], "Méta-armure importée");
   const imageUrl = /paladin/i.test(armorName) ? "/meta-armors/paladin-r.png" : undefined;
-  const armorBonus = readModuleBonusAtCurrentLevel(items, "armure");
+  const armorGauge = normalizeArmorPointsGauge(system, items);
   const shieldBonus = readModuleBonusAtCurrentLevel(items, "champDeForce");
+  const shieldMax = pickFirstNumber(metaArmor, [["champDeForce", "base"]], 0) + shieldBonus;
 
   for (const item of items) {
     if (pickFirstString(item, [["type"]]).toLowerCase() !== "module") {
@@ -1100,13 +1163,10 @@ function parseMetaArmorFromItems(items: Record<string, unknown>[], system: Recor
     frame: pickFirstString(metaArmor, [["description"]], "Non renseigné"),
     generation: String(pickFirstNumber(metaArmor, [["generation"]], 0) || "Non renseignée"),
     imageUrl,
-    armorPoints: {
-      current: pickFirstNumber(system, [["armure", "value"]], 0),
-      max: pickFirstNumber(metaArmor, [["armure", "base"]], 0) + armorBonus
-    },
+    armorPoints: armorGauge,
     shieldPoints: {
       current: pickFirstNumber(system, [["champDeForce", "value"]], 0),
-      max: pickFirstNumber(metaArmor, [["champDeForce", "base"]], 0) + shieldBonus
+      max: shieldMax
     },
     overdrive: {
       current: pickFirstNumber(system, [["flux", "value"]], 0),
@@ -1290,7 +1350,7 @@ export function normalizeFoundryKnightActor(actor: FoundryKnightActor): KnightCh
     aegis,
     defense,
     reaction,
-    energy: normalizeFlatGauge(readRecord(system.energie)),
+    energy: normalizeArmorEnergyGauge(system, items),
     trauma: parseGauge(system, [["trauma"]], { current: 0, max: 0 }),
     aspectGroups,
     aspects,
