@@ -283,15 +283,26 @@ function normalizeHealthGauge(record: Record<string, unknown>, fallbackCurrent =
   };
 }
 
-function normalizeHopeGauge(record: Record<string, unknown>, fallbackCurrent = 0): Gauge {
+function countCyberneticHopePenalty(items: Record<string, unknown>[]) {
+  return items.filter((item) => {
+    if (pickFirstString(item, [["type"]]).toLowerCase() !== "blessure") {
+      return false;
+    }
+
+    return readBoolean(readRecord(readRecord(item.system).soigne).implant, false);
+  }).length * 3;
+}
+
+function normalizeHopeGauge(record: Record<string, unknown>, items: Record<string, unknown>[] = [], fallbackCurrent = 0): Gauge {
   const current = pickFirstNumber(record, [["value"], ["current"]], fallbackCurrent);
   const explicitMax = pickFirstNumber(record, [["max"], ["base"]], 0);
-  const maxBonus = Math.trunc(readGaugeAdjustment(record) / 2);
-  const computedMax = current + maxBonus;
+  const maxBonus = readGaugeAdjustment(record);
+  const cyberneticPenalty = countCyberneticHopePenalty(items);
+  const computedMax = 50 + maxBonus - cyberneticPenalty;
 
   return {
     current,
-    max: explicitMax > 0 ? explicitMax + maxBonus : Math.max(current, computedMax)
+    max: explicitMax > 0 ? explicitMax + maxBonus - cyberneticPenalty : Math.max(current, computedMax)
   };
 }
 
@@ -1342,7 +1353,7 @@ export function normalizeFoundryKnightActor(actor: FoundryKnightActor): KnightCh
     languages,
     distinctions,
     health: normalizeHealthGauge(readRecord(system.sante)),
-    hope: normalizeHopeGauge(readRecord(system.espoir)),
+    hope: normalizeHopeGauge(readRecord(system.espoir), items),
     heroism: {
       current: Math.min(importedHeroism.current, 6),
       max: 6
