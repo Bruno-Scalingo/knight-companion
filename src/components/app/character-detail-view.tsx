@@ -456,6 +456,30 @@ function EquipmentCard({ item }: { item: EquipmentItem }) {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
+        {item.slot === "weapon" && (item.damage || item.violence) ? (
+          <div className="grid grid-cols-2 gap-3">
+            {item.damage && (item.damage.dice > 0 || item.damage.fixe > 0) ? (
+              <div className="rounded-md border p-3">
+                <p className="text-xs font-medium uppercase tracking-normal text-muted-foreground">Dégâts</p>
+                <p className="mt-1 text-lg font-bold">
+                  {item.damage.dice > 0 ? `${item.damage.dice}D6` : ""}
+                  {item.damage.dice > 0 && item.damage.fixe > 0 ? " + " : ""}
+                  {item.damage.fixe > 0 ? item.damage.fixe : ""}
+                </p>
+              </div>
+            ) : null}
+            {item.violence && (item.violence.dice > 0 || item.violence.fixe > 0) ? (
+              <div className="rounded-md border p-3">
+                <p className="text-xs font-medium uppercase tracking-normal text-muted-foreground">Violence</p>
+                <p className="mt-1 text-lg font-bold">
+                  {item.violence.dice > 0 ? `${item.violence.dice}D6` : ""}
+                  {item.violence.dice > 0 && item.violence.fixe > 0 ? " + " : ""}
+                  {item.violence.fixe > 0 ? item.violence.fixe : ""}
+                </p>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
         <p className="text-sm leading-6 text-muted-foreground">{item.description}</p>
         {item.slot === "module" && item.slotUsage && item.slotUsage.length > 0 ? (
           <div className="flex flex-wrap gap-2">

@@ -1034,6 +1034,20 @@ function normalizeEquipmentItem(item: Record<string, unknown>, index: number): E
           ? "distance"
           : undefined,
     range: pickFirstString(system, [["portee"], ["portée"], ["range"]]),
+    damage:
+      rawType === "arme"
+        ? {
+            dice: pickFirstNumber(system, [["degats", "dice"]], 0),
+            fixe: pickFirstNumber(system, [["degats", "fixe"]], 0)
+          }
+        : undefined,
+    violence:
+      rawType === "arme"
+        ? {
+            dice: pickFirstNumber(system, [["violence", "dice"]], 0),
+            fixe: pickFirstNumber(system, [["violence", "fixe"]], 0)
+          }
+        : undefined,
     isOverdriveModule:
       rawType === "module" && readBoolean(readRecord(currentLevelDetails.overdrives).has, false),
     moduleType: rawType === "module" ? pickFirstString(system, [["categorie"], ["category"]]) : undefined,

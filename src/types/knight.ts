@@ -125,6 +125,11 @@ export type MetaArmor = {
 
 export type EquipmentSlot = "weapon" | "armor" | "module" | "relic" | "consumable" | "other";
 
+export type DiceRoll = {
+  dice: number;
+  fixe: number;
+};
+
 export type EquipmentItem = {
   id: string;
   name: string;
@@ -134,6 +139,8 @@ export type EquipmentItem = {
   slotUsage?: string[];
   weaponType?: "contact" | "distance";
   range?: string;
+  damage?: DiceRoll;
+  violence?: DiceRoll;
   isOverdriveModule?: boolean;
   moduleType?: string;
   level?: number;
